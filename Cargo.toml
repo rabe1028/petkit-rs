@@ -1,0 +1,50 @@
+[workspace]
+exclude = ["fuzz"]
+members = [
+    "crates/petkit-types",
+    "crates/petkit-protocol",
+    "crates/petkit-client",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/rabe1028/petkit-rs"
+rust-version = "1.88"
+version = "0.1.0"
+
+[workspace.dependencies]
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
+md-5 = { version = "0.10.6", default-features = false }
+nojson = { version = "0.3.12", default-features = false }
+percent-encoding = { version = "2.3.2", default-features = false }
+petkit-protocol = { version = "0.1.0", path = "crates/petkit-protocol" }
+petkit-types = { version = "0.1.0", path = "crates/petkit-types", default-features = false }
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+clone_on_ref_ptr = "warn"
+dbg_macro = "deny"
+expect_used = "warn"
+module_name_repetitions = "allow"
+multiple_crate_versions = "allow"
+print_stderr = "warn"
+print_stdout = "warn"
+todo = "warn"
+unwrap_used = "warn"
+wildcard_dependencies = "deny"
+
+[profile.test]
+opt-level = 1
+
+[profile.mutants]
+inherits = "test"
+debug = "none"
+incremental = true

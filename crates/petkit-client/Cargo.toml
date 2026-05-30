@@ -1,0 +1,43 @@
+[package]
+name = "petkit-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "std transport adapters and high-level clients for petkit-rs"
+
+[features]
+default = ["async", "blocking"]
+async = []
+blocking = []
+# Enables the bundled reqwest transports. PetKit hosts only serve HTTPS, so a
+# TLS backend is required; rustls is wired in by default. gzip/deflate are
+# enabled because the emulated mobile-app `Accept-Encoding` header advertises
+# them and the server may return compressed bodies.
+reqwest-async = ["dep:reqwest", "reqwest/rustls-tls", "reqwest/gzip", "reqwest/deflate"]
+reqwest-blocking = ["dep:reqwest", "reqwest/blocking", "reqwest/rustls-tls", "reqwest/gzip", "reqwest/deflate"]
+ureq-blocking = ["dep:ureq"]
+# Backwards-compatible alias that matches the historical reqwest-native behavior.
+reqwest-native = ["reqwest-async", "reqwest-blocking"]
+# Backwards-compatible alias if you prefer to be explicit at the call site.
+rustls-tls = ["reqwest-native"]
+
+[lints]
+workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
+[dependencies]
+hex.workspace = true
+md-5.workspace = true
+nojson.workspace = true
+petkit-protocol.workspace = true
+petkit-types.workspace = true
+reqwest = { version = "0.12.24", default-features = false, optional = true }
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"], optional = true }
+
+[dev-dependencies]
+futures = { version = "0.3.31", default-features = false, features = ["executor"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

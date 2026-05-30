@@ -1,0 +1,18 @@
+[package]
+name = "petkit-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Shared no_std-friendly types for the petkit-rs workspace"
+
+[features]
+default = ["std"]
+std = []
+
+[lints]
+workspace = true
+
+[dependencies]
+nojson.workspace = true

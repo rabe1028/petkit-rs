@@ -1,0 +1,51 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --all --check
+        entry: cargo fmt --all --check
+        language: system
+        pass_filenames: false
+        files: &rust_workspace_files ^(Cargo\.toml|Cargo\.lock|deny\.toml|clippy\.toml|\.cargo/config\.toml|crates/.*|fuzz/.*|\.github/workflows/.*)$
+
+      - id: cargo-clippy
+        name: cargo clippy --workspace --all-targets --all-features
+        entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+        files: *rust_workspace_files
+
+      - id: cargo-doc
+        name: cargo doc rustdoc broken link check
+        entry: sh -c 'RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links" cargo doc --workspace --all-features --no-deps'
+        language: system
+        pass_filenames: false
+        files: *rust_workspace_files
+
+      - id: no-std-check
+        name: cargo check no_std crates
+        entry: sh -c 'cargo check -p petkit-types --no-default-features && cargo check -p petkit-protocol --no-default-features'
+        language: system
+        pass_filenames: false
+        files: *rust_workspace_files
+
+      - id: cargo-deny
+        name: cargo deny check bans licenses sources
+        entry: cargo deny check bans licenses sources
+        language: system
+        pass_filenames: false
+        files: *rust_workspace_files
+
+      - id: cargo-machete
+        name: cargo machete
+        entry: cargo machete
+        language: system
+        pass_filenames: false
+        files: *rust_workspace_files
+
+      - id: typos
+        name: typos
+        entry: typos
+        language: system
+        pass_filenames: false
+        files: ^(.*\.(rs|toml|md|yaml|yml|json)|\.github/workflows/.*)$

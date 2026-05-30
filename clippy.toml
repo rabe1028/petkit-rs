@@ -1,0 +1,8 @@
+avoid-breaking-exported-api = false
+cognitive-complexity-threshold = 20
+too-many-arguments-threshold = 8
+too-many-lines-threshold = 120
+type-complexity-threshold = 150
+disallowed-methods = [
+  { path = "std::process::exit", reason = "Return typed errors instead of exiting directly." },
+]

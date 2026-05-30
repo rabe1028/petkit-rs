@@ -1,0 +1,21 @@
+[package]
+name = "petkit-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Sans-io protocol builders and parsers for petkit-rs"
+
+[features]
+default = ["std"]
+std = ["petkit-types/std", "nojson/std"]
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+nojson.workspace = true
+percent-encoding.workspace = true
+petkit-types.workspace = true

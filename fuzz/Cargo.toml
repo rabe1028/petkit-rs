@@ -1,0 +1,43 @@
+[package]
+name = "petkit-protocol-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nojson = "0.3.12"
+
+[dependencies.petkit-protocol]
+path = "../crates/petkit-protocol"
+
+[dependencies.petkit-types]
+path = "../crates/petkit-types"
+
+# Use independent workspace for fuzzers
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "api_response"
+path = "fuzz_targets/api_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "base_url_join"
+path = "fuzz_targets/base_url_join.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ble_frame"
+path = "fuzz_targets/ble_frame.rs"
+test = false
+doc = false
+bench = false

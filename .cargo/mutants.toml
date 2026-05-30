@@ -1,0 +1,5 @@
+profile = "mutants"
+cap_lints = true
+copy_target = true
+timeout_multiplier = 2.0
+build_timeout_multiplier = 2.0
