@@ -27,8 +27,8 @@ pub use device::{
 pub use discovery::{flatten_devices, resolve_device, DeviceCatalog, DeviceLookup};
 pub use error::{PetkitError, PetkitErrorCode};
 pub use media::{
-    latest_image_metadata, CloudVideoResponse, MediaEventType, MediaListResponse, MediaMetadata,
-    MediaType,
+    latest_image_metadata, latest_video_metadata, CloudVideoResponse, GetDownloadM3u8Response,
+    GetM3u8Response, M3u8Response, MediaEventType, MediaListResponse, MediaMetadata, MediaType,
 };
 pub use region::{
     gateway_label, group_region_servers, RegionServer, RegionServerGroup, RegionServersPayload,

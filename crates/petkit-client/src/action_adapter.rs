@@ -1,20 +1,31 @@
 use petkit_types::{
-    FountainAction, LbCommand, LitterControl, LitterWorkMode, PetkitError, PurifierControl,
-    PurifierMode,
+    CustomSetting, CustomSettingValue, FeederSetting, FeederSurplusGrams, FountainAction,
+    LbCommand, LitterControl, LitterWorkMode, PetkitError, PurifierControl, PurifierMode,
+    SettingInt, SettingString, SoundId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParsedAction {
-    FeederManualFeed { amount: u16 },
-    FeederManualFeedDual { amount1: u16, amount2: u16 },
+    FeederManualFeed {
+        amount: u16,
+    },
+    FeederManualFeedDual {
+        amount1: u16,
+        amount2: u16,
+    },
     FeederCancelManualFeed,
     FeederCallPet,
+    FeederPlaySound(SoundId),
     FeederFoodReplenished,
     FeederResetDesiccant,
+    FeederUpdateSetting(FeederSetting),
     LitterControl(LitterControl),
     LitterResetN50Deodorizer,
     PurifierControl(PurifierControl),
     Fountain(FountainAction),
+    /// Family dispatch is intentionally left to the caller because Petkit has
+    /// separate update-setting endpoints for feeder, litter, purifier, etc.
+    UpdateSetting(CustomSetting),
 }
 
 pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction, PetkitError> {
@@ -35,8 +46,23 @@ pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction,
         }
         "cancel_feed" | "cancel_manual_feed" => Ok(ParsedAction::FeederCancelManualFeed),
         "call_pet" => Ok(ParsedAction::FeederCallPet),
+        "play_sound" => Ok(ParsedAction::FeederPlaySound(SoundId::new(
+            parse_u64_any(args, &["sound", "sound_id"])?,
+        )?)),
         "food_replenished" => Ok(ParsedAction::FeederFoodReplenished),
         "reset_desiccant" => Ok(ParsedAction::FeederResetDesiccant),
+        "surplus_level" | "surplus_grams" | "surplus" => {
+            Ok(ParsedAction::FeederUpdateSetting(FeederSetting::Surplus(
+                FeederSurplusGrams::new(parse_u16_any(
+                    args,
+                    &["value", "grams", "level", "surplus", "surplus_grams"],
+                )?)?,
+            )))
+        }
+        "update_setting" => Ok(ParsedAction::UpdateSetting(parse_custom_setting(args)?)),
+        "camera_ptz" => Err(PetkitError::InvalidArgument(String::from(
+            "`camera_ptz` is an Agora/RTM action and is intentionally outside the HTTP action adapter",
+        ))),
         "litterbox_clean" | "scoop" => {
             Ok(ParsedAction::LitterControl(LitterControl::StartCleaning))
         }
@@ -77,6 +103,56 @@ pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction,
             "unsupported Petkit action `{action}`"
         ))),
     }
+}
+
+fn parse_custom_setting(args: &[(&str, &str)]) -> Result<CustomSetting, PetkitError> {
+    let key = arg_any(args, &["key", "setting", "name"]).ok_or_else(|| {
+        PetkitError::InvalidArgument(String::from("update_setting requires `key`"))
+    })?;
+    let value = parse_custom_setting_value(args)?;
+    CustomSetting::new(key, value)
+}
+
+fn parse_custom_setting_value(args: &[(&str, &str)]) -> Result<CustomSettingValue, PetkitError> {
+    if let Some(raw_json) = arg_any(args, &["value_json", "json"]) {
+        return Ok(CustomSettingValue::json(raw_json)?);
+    }
+
+    let raw = arg_any(args, &["value", "setting_value"]).ok_or_else(|| {
+        PetkitError::InvalidArgument(String::from("update_setting requires `value`"))
+    })?;
+    let value_type = arg_any(args, &["type", "value_type"]).map(normalize_action);
+    match value_type.as_deref() {
+        Some("bool" | "boolean") => {
+            return Ok(CustomSettingValue::BoolAsInt(parse_bool_value(raw)?))
+        }
+        Some("int" | "integer" | "number") => {
+            return Ok(CustomSettingValue::Int(SettingInt::new(parse_i64_value(
+                "value", raw,
+            )?)?));
+        }
+        Some("json") => return Ok(CustomSettingValue::json(raw)?),
+        Some("string" | "text") => {
+            return Ok(CustomSettingValue::String(SettingString::new(raw)?));
+        }
+        Some(other) => {
+            return Err(PetkitError::InvalidArgument(format!(
+                "unsupported update_setting value type `{other}`"
+            )));
+        }
+        None => {}
+    }
+
+    if raw.trim_start().starts_with(['{', '[']) {
+        return Ok(CustomSettingValue::json(raw)?);
+    }
+    if let Ok(value) = raw.parse::<i64>() {
+        return Ok(CustomSettingValue::Int(SettingInt::new(value)?));
+    }
+    if let Ok(value) = parse_bool_value(raw) {
+        return Ok(CustomSettingValue::BoolAsInt(value));
+    }
+    Ok(CustomSettingValue::String(SettingString::new(raw)?))
 }
 
 fn parse_litterbox_reset(args: &[(&str, &str)]) -> Result<ParsedAction, PetkitError> {
@@ -161,9 +237,14 @@ fn normalize_action(value: &str) -> String {
 }
 
 fn arg<'a>(args: &'a [(&str, &str)], key: &str) -> Option<&'a str> {
+    let normalized_key = normalize_action(key);
     args.iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(key))
+        .find(|(name, _)| normalize_action(name) == normalized_key)
         .map(|(_, value)| *value)
+}
+
+fn arg_any<'a>(args: &'a [(&str, &str)], keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| arg(args, key))
 }
 
 fn parse_positive_u16(args: &[(&str, &str)], key: &'static str) -> Result<u16, PetkitError> {
@@ -181,6 +262,17 @@ fn parse_u16(args: &[(&str, &str)], key: &'static str) -> Result<u16, PetkitErro
     parse_u64(args, key).and_then(|value| {
         u16::try_from(value).map_err(|error| {
             PetkitError::InvalidArgument(format!("Petkit action `{key}` is out of range: {error}"))
+        })
+    })
+}
+
+fn parse_u16_any(args: &[(&str, &str)], keys: &[&'static str]) -> Result<u16, PetkitError> {
+    parse_u64_any(args, keys).and_then(|value| {
+        u16::try_from(value).map_err(|error| {
+            PetkitError::InvalidArgument(format!(
+                "Petkit action `{}` is out of range: {error}",
+                keys[0]
+            ))
         })
     })
 }
@@ -204,25 +296,46 @@ fn parse_u64(args: &[(&str, &str)], key: &'static str) -> Result<u64, PetkitErro
         })
 }
 
-fn parse_i64(args: &[(&str, &str)], key: &'static str) -> Result<i64, PetkitError> {
-    arg(args, key)
-        .ok_or_else(|| PetkitError::InvalidArgument(format!("Petkit action requires `{key}`")))?
-        .parse::<i64>()
+fn parse_u64_any(args: &[(&str, &str)], keys: &[&'static str]) -> Result<u64, PetkitError> {
+    let key_list = keys.join("` or `");
+    arg_any(args, keys)
+        .ok_or_else(|| {
+            PetkitError::InvalidArgument(format!("Petkit action requires `{key_list}`"))
+        })?
+        .parse::<u64>()
         .map_err(|error| {
             PetkitError::InvalidArgument(format!(
-                "Petkit action `{key}` must be an integer: {error}"
+                "Petkit action `{}` must be an integer: {error}",
+                keys[0]
             ))
         })
+}
+
+fn parse_i64(args: &[(&str, &str)], key: &'static str) -> Result<i64, PetkitError> {
+    let value = arg(args, key)
+        .ok_or_else(|| PetkitError::InvalidArgument(format!("Petkit action requires `{key}`")))?;
+    parse_i64_value(key, value)
+}
+
+fn parse_i64_value(key: &'static str, value: &str) -> Result<i64, PetkitError> {
+    value.parse::<i64>().map_err(|error| {
+        PetkitError::InvalidArgument(format!("Petkit action `{key}` must be an integer: {error}"))
+    })
 }
 
 fn parse_bool(args: &[(&str, &str)], key: &'static str) -> Result<bool, PetkitError> {
     let value = arg(args, key)
         .ok_or_else(|| PetkitError::InvalidArgument(format!("Petkit action requires `{key}`")))?;
+    parse_bool_value(value)
+        .map_err(|_| PetkitError::InvalidArgument(format!("Petkit action `{key}` must be boolean")))
+}
+
+fn parse_bool_value(value: &str) -> Result<bool, PetkitError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "on" | "yes" => Ok(true),
         "0" | "false" | "off" | "no" => Ok(false),
-        _ => Err(PetkitError::InvalidArgument(format!(
-            "Petkit action `{key}` must be boolean"
+        _ => Err(PetkitError::InvalidArgument(String::from(
+            "Petkit action value must be boolean",
         ))),
     }
 }
@@ -267,6 +380,78 @@ mod tests {
             parse_action("fountain_reset_filter", &[]).expect("fountain should parse"),
             ParsedAction::Fountain(FountainAction::ResetFilter)
         );
+    }
+
+    #[test]
+    fn parses_play_sound_aliases_with_sound_id_validation() {
+        assert_eq!(
+            parse_action("play_sound", &[("sound", "7")]).expect("play_sound should parse"),
+            ParsedAction::FeederPlaySound(SoundId::new(7).expect("sound id should be valid"))
+        );
+        assert_eq!(
+            parse_action("play-sound", &[("sound-id", "8")])
+                .expect("play-sound alias should parse"),
+            ParsedAction::FeederPlaySound(SoundId::new(8).expect("sound id should be valid"))
+        );
+        assert!(parse_action("play_sound", &[("sound_id", "0")]).is_err());
+    }
+
+    #[test]
+    fn parses_surplus_level_aliases_with_feeder_validation() {
+        assert_eq!(
+            parse_action("surplus_level", &[("value", "20")]).expect("surplus_level should parse"),
+            ParsedAction::FeederUpdateSetting(FeederSetting::Surplus(
+                FeederSurplusGrams::new(20).expect("surplus should be valid")
+            ))
+        );
+        assert_eq!(
+            parse_action("surplus-level", &[("grams", "100")])
+                .expect("surplus-level alias should parse"),
+            ParsedAction::FeederUpdateSetting(FeederSetting::Surplus(
+                FeederSurplusGrams::new(100).expect("surplus should be valid")
+            ))
+        );
+        assert!(parse_action("surplus_level", &[("value", "19")]).is_err());
+    }
+
+    #[test]
+    fn parses_generic_update_setting_for_caller_dispatch() {
+        assert_eq!(
+            parse_action("update_setting", &[("key", "feedNotify"), ("value", "1")])
+                .expect("update_setting should parse"),
+            ParsedAction::UpdateSetting(
+                CustomSetting::new(
+                    "feedNotify",
+                    CustomSettingValue::Int(SettingInt::new(1).expect("int should be valid"))
+                )
+                .expect("custom setting should be valid")
+            )
+        );
+        assert_eq!(
+            parse_action(
+                "update-setting",
+                &[
+                    ("key", "settings.window"),
+                    ("value", "true"),
+                    ("type", "bool")
+                ]
+            )
+            .expect("update-setting should parse"),
+            ParsedAction::UpdateSetting(
+                CustomSetting::new("settings.window", CustomSettingValue::BoolAsInt(true))
+                    .expect("custom setting should be valid")
+            )
+        );
+        assert!(parse_action(
+            "update_setting",
+            &[("key", "settings.raw"), ("value_json", "{\"mode\":2}")]
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn documents_camera_ptz_as_out_of_scope() {
+        assert!(parse_action("camera_ptz", &[("direction", "left")]).is_err());
     }
 
     #[test]

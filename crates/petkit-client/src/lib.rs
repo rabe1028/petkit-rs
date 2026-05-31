@@ -18,9 +18,9 @@ use petkit_protocol::{
 use petkit_types::PetkitError;
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_types::{
-    flatten_devices, AccountGroup, CalibrationAction, ClientContext, DeviceCatalog,
-    DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList, FeedEntryId,
-    FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
+    flatten_devices, AccountGroup, CalibrationAction, ClientContext, CloudVideoResponse,
+    DeviceCatalog, DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList,
+    FeedEntryId, FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
     FeederCancelManualFeedResponse, FeederDeviceDetailResponse, FeederDeviceType,
     FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
     FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
@@ -28,15 +28,16 @@ use petkit_types::{
     FeederSaveRepeatsResponse, FeederScheduleCompleteResponse, FeederScheduleRemoveResponse,
     FeederScheduleSaveResponse, FeederSetting, FeederStartLiveResponse, FeederSuspendFeedResponse,
     FeederUpdateSettingResponse, FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
-    FountainUpdateSettingResponse, IotConfigSet, IotDeviceInfoV1Response, IotDeviceInfoV2Response,
-    LitterControl, LitterControlDeviceResponse, LitterDeviceDetailResponse, LitterDeviceType,
-    LitterOpenCameraResponse, LitterResetN50DeodorizerResponse, LitterScheduleCompleteResponse,
-    LitterScheduleRemoveResponse, LitterScheduleSaveResponse, LitterSetting,
-    LitterStartLiveResponse, LitterUpdateSettingResponse, LoginResponse, PetId,
-    PetUpdateSettingResponse, PetkitDay, PurifierControl, PurifierControlDeviceResponse,
-    PurifierDeviceDetailResponse, PurifierDeviceType, PurifierSetting,
-    PurifierUpdateSettingResponse, RefreshSessionResponse, RegionServersPayload,
-    RegionServersResponse, RepeatSchedule, RequestLoginCodeResponse, Session, SoundId,
+    FountainUpdateSettingResponse, GetDownloadM3u8Response, GetM3u8Response, IotConfigSet,
+    IotDeviceInfoV1Response, IotDeviceInfoV2Response, LitterControl, LitterControlDeviceResponse,
+    LitterDeviceDetailResponse, LitterDeviceType, LitterOpenCameraResponse,
+    LitterResetN50DeodorizerResponse, LitterScheduleCompleteResponse, LitterScheduleRemoveResponse,
+    LitterScheduleSaveResponse, LitterSetting, LitterStartLiveResponse,
+    LitterUpdateSettingResponse, LoginResponse, PetId, PetUpdateSettingResponse, PetkitDay,
+    PurifierControl, PurifierControlDeviceResponse, PurifierDeviceDetailResponse,
+    PurifierDeviceType, PurifierSetting, PurifierUpdateSettingResponse, RefreshSessionResponse,
+    RegionServersPayload, RegionServersResponse, RepeatSchedule, RequestLoginCodeResponse, Session,
+    SoundId,
 };
 
 #[cfg(feature = "action-adapter")]
@@ -908,6 +909,18 @@ where
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
     }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
 }
 
 #[cfg(feature = "async")]
@@ -922,6 +935,22 @@ where
 
     pub async fn start_live(&self) -> Result<FeederStartLiveResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.start_live_request()).await
+    }
+
+    pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request()).await
+    }
+
+    pub async fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request()).await
+    }
+
+    pub async fn get_download_m3u8(
+        &self,
+    ) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.get_download_m3u8_request())
+            .await
     }
 }
 
@@ -1120,6 +1149,18 @@ where
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
     }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
 }
 
 #[cfg(feature = "blocking")]
@@ -1134,6 +1175,18 @@ where
 
     pub fn start_live(&self) -> Result<FeederStartLiveResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.start_live_request())
+    }
+
+    pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request())
+    }
+
+    pub fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request())
+    }
+
+    pub fn get_download_m3u8(&self) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_download_m3u8_request())
     }
 }
 
@@ -1239,6 +1292,18 @@ where
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
     }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
 }
 
 #[cfg(feature = "async")]
@@ -1253,6 +1318,22 @@ where
 
     pub async fn start_live(&self) -> Result<LitterStartLiveResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.start_live_request()).await
+    }
+
+    pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request()).await
+    }
+
+    pub async fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request()).await
+    }
+
+    pub async fn get_download_m3u8(
+        &self,
+    ) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.get_download_m3u8_request())
+            .await
     }
 }
 
@@ -1346,6 +1427,18 @@ where
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
     }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
 }
 
 #[cfg(feature = "blocking")]
@@ -1360,6 +1453,18 @@ where
 
     pub fn start_live(&self) -> Result<LitterStartLiveResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.start_live_request())
+    }
+
+    pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request())
+    }
+
+    pub fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request())
+    }
+
+    pub fn get_download_m3u8(&self) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_download_m3u8_request())
     }
 }
 
@@ -1779,6 +1884,77 @@ pub mod host_callback {
     }
 }
 
+#[cfg(feature = "blocking")]
+pub mod blocking_host_callback {
+    use core::fmt;
+
+    use petkit_protocol::{RequestSpec, ResponseParts};
+
+    use super::BlockingTransport;
+
+    pub trait BlockingHostCallback {
+        type Error;
+
+        fn call(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error>;
+    }
+
+    pub struct BlockingHostCallbackTransport<C> {
+        callback: C,
+    }
+
+    impl<C> BlockingHostCallbackTransport<C> {
+        pub fn new(callback: C) -> Self {
+            Self { callback }
+        }
+
+        pub fn callback(&self) -> &C {
+            &self.callback
+        }
+    }
+
+    impl<F> BlockingHostCallbackTransport<FnBlockingHostCallback<F>> {
+        pub fn from_fn(callback: F) -> Self {
+            Self::new(FnBlockingHostCallback(callback))
+        }
+    }
+
+    impl<C> fmt::Debug for BlockingHostCallbackTransport<C> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("BlockingHostCallbackTransport").finish()
+        }
+    }
+
+    impl<C> BlockingTransport for BlockingHostCallbackTransport<C>
+    where
+        C: BlockingHostCallback,
+    {
+        type Error = C::Error;
+
+        fn send(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error> {
+            self.callback.call(request)
+        }
+    }
+
+    pub struct FnBlockingHostCallback<F>(F);
+
+    impl<F> fmt::Debug for FnBlockingHostCallback<F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("FnBlockingHostCallback").finish()
+        }
+    }
+
+    impl<F, E> BlockingHostCallback for FnBlockingHostCallback<F>
+    where
+        F: Fn(RequestSpec) -> Result<ResponseParts, E>,
+    {
+        type Error = E;
+
+        fn call(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error> {
+            (self.0)(request)
+        }
+    }
+}
+
 // ---------- Reqwest adapters ----------
 
 #[cfg(any(
@@ -2111,21 +2287,25 @@ pub mod ureq_blocking {
 mod tests {
     use std::sync::Mutex;
 
-    #[cfg(feature = "async")]
+    #[cfg(any(feature = "async", feature = "blocking"))]
     use std::cell::RefCell;
     #[cfg(feature = "async")]
     use std::future::{ready, Future};
-    #[cfg(feature = "async")]
+    #[cfg(any(feature = "async", feature = "blocking"))]
     use std::rc::Rc;
 
     #[cfg(feature = "async")]
     use futures::executor::block_on;
 
-    use petkit_protocol::{BaseUrl, RequestSpec, ResponseParts};
+    use petkit_protocol::{
+        BaseUrl, D4shFeeder, Header, HttpMethod, RequestSpec, ResponseParts, T6Litter,
+    };
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
-    use petkit_types::{ClientContext, ClientProfile, DeviceSummary, DeviceType};
+    use petkit_types::{ClientContext, ClientProfile, DeviceId, DeviceSummary, DeviceType};
 
+    #[cfg(feature = "blocking")]
+    use super::blocking_host_callback::BlockingHostCallbackTransport;
     use super::hash_password_md5;
     #[cfg(feature = "async")]
     use super::host_callback::HostCallbackTransport;
@@ -2333,6 +2513,80 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_host_callback_transport_forwards_request_spec() {
+        let seen = Rc::new(RefCell::new(None));
+        let transport = BlockingHostCallbackTransport::from_fn({
+            let seen = Rc::clone(&seen);
+            move |request: RequestSpec| {
+                seen.borrow_mut().replace(request);
+                Ok::<_, std::convert::Infallible>(ResponseParts::new(
+                    200,
+                    vec![Header::new("X-Host", "ok")],
+                    br#"{"result":true}"#.to_vec(),
+                ))
+            }
+        });
+        let request = RequestSpec::new(
+            HttpMethod::Post,
+            &BaseUrl::Absolute("https://host.example/api".into()),
+            "device/action",
+        )
+        .push_header("X-Test", "forwarded")
+        .push_query("q", "1")
+        .push_form_field("deviceId", "42")
+        .push_form_field("payload", "redacted");
+
+        let response = transport
+            .send(request.clone())
+            .expect("host call should work");
+        let captured = seen
+            .borrow()
+            .clone()
+            .expect("request should be forwarded to callback");
+
+        assert_eq!(response.body, br#"{"result":true}"#);
+        assert_eq!(captured.method, request.method);
+        assert_eq!(captured.url, request.url);
+        assert_eq!(captured.headers, request.headers);
+        assert_eq!(captured.query, request.query);
+        assert_eq!(captured.form_fields, request.form_fields);
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_camera_media_helpers_execute_typed_responses() {
+        let transport = MockBlockingTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(
+                200,
+                vec![],
+                br#"{"result":{"data":{"downloadUrl":"https://media.example/redacted/download.m3u8","aesKey":"aes-redacted"}}}"#.to_vec(),
+            ),
+        };
+        let client = BlockingPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+
+        let response = client
+            .authenticated()
+            .litter_typed::<T6Litter>(DeviceId::new(42).expect("device id should be valid"))
+            .get_download_m3u8()
+            .expect("download m3u8 should parse");
+
+        assert_eq!(
+            response.primary_url(),
+            Some("https://media.example/redacted/download.m3u8")
+        );
+        let request = client
+            .transport
+            .last_request
+            .lock()
+            .expect("request mutex should not be poisoned")
+            .clone()
+            .expect("m3u8 request should be captured");
+        assert_eq!(request.path, "t6/getDownloadM3u8");
+    }
+
     #[cfg(feature = "async")]
     #[test]
     fn async_client_request_login_code_propagates_false() {
@@ -2485,5 +2739,41 @@ mod tests {
                 petkit: None,
             }
         );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_camera_media_helpers_execute_typed_responses() {
+        let transport = MockAsyncTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(
+                200,
+                vec![],
+                br#"{"result":{"data":{"mediaApi":"https://media.example/redacted/cloud.m3u8","aesKey":"aes-redacted"}}}"#.to_vec(),
+            ),
+        };
+        let client = AsyncPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+
+        let response = block_on(
+            client
+                .authenticated()
+                .feeder_typed::<D4shFeeder>(DeviceId::new(42).expect("device id should be valid"))
+                .cloud_video(),
+        )
+        .expect("cloud video should parse");
+
+        assert_eq!(
+            response.media_api.as_deref(),
+            Some("https://media.example/redacted/cloud.m3u8")
+        );
+        assert_eq!(response.aes_key.as_deref(), Some("aes-redacted"));
+        let request = client
+            .transport
+            .last_request
+            .lock()
+            .expect("request mutex should not be poisoned")
+            .clone()
+            .expect("cloud video request should be captured");
+        assert_eq!(request.path, "d4sh/cloud/video");
     }
 }

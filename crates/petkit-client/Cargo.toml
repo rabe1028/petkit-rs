@@ -46,3 +46,7 @@ tokio = { version = "1.28.1", features = ["rt", "rt-multi-thread", "macros"] }
 [[example]]
 name = "host_callback_async"
 required-features = ["async"]
+
+[[example]]
+name = "host_callback_blocking"
+required-features = ["blocking"]
