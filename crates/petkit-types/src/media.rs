@@ -135,33 +135,48 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for MediaMetadata {
     type Error = JsonParseError;
 
     fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let media_type =
+            optional_text_any(value, &["mediaType", "media_type", "type"])?.map(MediaType::from);
+        let generic_url = optional_text_any(value, &["url"])?;
+        let mut image_url = optional_text_any(
+            value,
+            &[
+                "image",
+                "imageUrl",
+                "image_url",
+                "img",
+                "imgUrl",
+                "img_url",
+                "preview",
+                "preview1",
+                "preview2",
+                "thumbnail",
+                "thumbUrl",
+                "shitPicture",
+                "picUrl",
+            ],
+        )?;
+        let mut video_url = optional_text_any(value, &["video", "videoUrl", "video_url"])?;
+        match media_type.as_ref() {
+            Some(MediaType::Video) => {
+                video_url = video_url.or(generic_url);
+            }
+            Some(MediaType::Image) => {
+                image_url = image_url.or(generic_url);
+            }
+            _ => {
+                image_url = image_url.or(generic_url);
+            }
+        }
+
         Ok(Self {
             event_id: optional_text_any(value, &["eventId", "event_id", "id", "picId"])?,
             event_type: optional_event_type(value)?,
-            media_type: optional_text_any(value, &["mediaType", "media_type", "type"])?
-                .map(MediaType::from),
+            media_type,
             device_id: optional_u64_any(value, &["deviceId", "device_id"])?,
             user_id: optional_u64_any(value, &["userId", "user_id"])?,
-            image_url: optional_text_any(
-                value,
-                &[
-                    "image",
-                    "imageUrl",
-                    "image_url",
-                    "img",
-                    "imgUrl",
-                    "img_url",
-                    "preview",
-                    "preview1",
-                    "preview2",
-                    "thumbnail",
-                    "thumbUrl",
-                    "shitPicture",
-                    "picUrl",
-                    "url",
-                ],
-            )?,
-            video_url: optional_text_any(value, &["video", "videoUrl", "video_url"])?,
+            image_url,
+            video_url,
             media_api: optional_text_any(value, &["mediaApi", "media_api"])?,
             aes_key: optional_text_any(value, &["aesKey", "aes_key", "shitAesKey"])?,
             timestamp: optional_u64_any(
@@ -481,6 +496,22 @@ mod tests {
             Some("https://media.example/redacted/fallback.jpg")
         );
         assert_eq!(latest.timestamp, Some(1_770_000_200));
+    }
+
+    #[test]
+    fn generic_video_url_is_not_classified_as_image() {
+        let response = with_result(
+            r#"{"result":{"items":[{"eventId":"evt-video","mediaType":"mp4","url":"https://media.example/redacted/video.mp4","eventTime":1770000300}]}}"#,
+            |value| MediaListResponse::try_from(value).expect("media list should parse"),
+        );
+
+        assert!(response.latest_image().is_none());
+        let latest = response.latest_video().expect("video should exist");
+        assert_eq!(
+            latest.video_url.as_deref(),
+            Some("https://media.example/redacted/video.mp4")
+        );
+        assert_eq!(latest.media_type, Some(MediaType::Video));
     }
 
     #[test]

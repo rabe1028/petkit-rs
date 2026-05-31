@@ -1,7 +1,7 @@
 use petkit_types::{
     CustomSetting, CustomSettingValue, FeederSetting, FeederSurplusGrams, FountainAction,
-    LbCommand, LitterControl, LitterWorkMode, PetkitError, PurifierControl, PurifierMode,
-    SettingInt, SettingString, SoundId,
+    LbCommand, LitterControl, LitterModeValue, LitterWorkMode, PetkitError, PurifierControl,
+    PurifierMode, SettingInt, SettingString, SoundId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -189,6 +189,7 @@ fn parse_litterbox_reset(args: &[(&str, &str)]) -> Result<ParsedAction, PetkitEr
 }
 
 fn parse_control_device(args: &[(&str, &str)]) -> Result<ParsedAction, PetkitError> {
+    let family = control_device_family(args);
     let control = normalize_action(
         arg(args, "control")
             .or_else(|| arg(args, "control_action"))
@@ -210,16 +211,53 @@ fn parse_control_device(args: &[(&str, &str)]) -> Result<ParsedAction, PetkitErr
         "end" => Ok(ParsedAction::LitterControl(LitterControl::End {
             work_mode: LitterWorkMode::new(parse_u8(args, "value")?)?,
         })),
-        "power" => Ok(ParsedAction::PurifierControl(PurifierControl::Power(
-            parse_bool(args, "value")?,
-        ))),
-        "mode" => Ok(ParsedAction::PurifierControl(PurifierControl::Mode(
-            parse_purifier_mode(args, "value")?,
-        ))),
+        "power" => {
+            let power = parse_bool(args, "value")?;
+            if family == Some(ControlDeviceFamily::Purifier) {
+                Ok(ParsedAction::PurifierControl(PurifierControl::Power(power)))
+            } else {
+                Ok(ParsedAction::LitterControl(LitterControl::Power(power)))
+            }
+        }
+        "mode" => {
+            if family == Some(ControlDeviceFamily::Purifier) {
+                Ok(ParsedAction::PurifierControl(PurifierControl::Mode(
+                    parse_purifier_mode(args, "value")?,
+                )))
+            } else {
+                Ok(ParsedAction::LitterControl(LitterControl::Mode(
+                    LitterModeValue::new(parse_u8(args, "value")?)?,
+                )))
+            }
+        }
         _ => Err(PetkitError::InvalidArgument(format!(
             "unsupported Petkit control action `{control}`"
         ))),
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlDeviceFamily {
+    Litter,
+    Purifier,
+}
+
+fn control_device_family(args: &[(&str, &str)]) -> Option<ControlDeviceFamily> {
+    let family = arg_any(
+        args,
+        &["family", "device_family", "device_type", "deviceType"],
+    )?;
+    let family = normalize_action(family);
+    if matches!(family.as_str(), "purifier" | "air_purifier" | "k2" | "k3") {
+        return Some(ControlDeviceFamily::Purifier);
+    }
+    if matches!(
+        family.as_str(),
+        "litter" | "litter_box" | "litterbox" | "toilet" | "pura" | "pura_max" | "pura_x"
+    ) {
+        return Some(ControlDeviceFamily::Litter);
+    }
+    None
 }
 
 fn custom_litter_command(
@@ -462,6 +500,35 @@ mod tests {
             &[("key", "settings.raw"), ("value_json", "{\"mode\":2}")]
         )
         .is_ok());
+    }
+
+    #[test]
+    fn routes_generic_control_device_power_by_family() {
+        assert_eq!(
+            parse_action(
+                "control_device",
+                &[
+                    ("control", "power"),
+                    ("value", "1"),
+                    ("family", "litterbox")
+                ]
+            )
+            .expect("litter control power should parse"),
+            ParsedAction::LitterControl(LitterControl::Power(true))
+        );
+        assert_eq!(
+            parse_action(
+                "control_device",
+                &[("control", "power"), ("value", "0"), ("family", "purifier")]
+            )
+            .expect("purifier control power should parse"),
+            ParsedAction::PurifierControl(PurifierControl::Power(false))
+        );
+        assert_eq!(
+            parse_action("control_device", &[("control", "power"), ("value", "true")])
+                .expect("unscoped control power should stay in control_device family"),
+            ParsedAction::LitterControl(LitterControl::Power(true))
+        );
     }
 
     #[test]
