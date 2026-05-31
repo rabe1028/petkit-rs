@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use core::{fmt, marker::PhantomData};
+use core::fmt;
+#[cfg(any(feature = "async", feature = "blocking"))]
+use core::marker::PhantomData;
 
 use md5::{Digest, Md5};
 #[cfg(any(feature = "async", feature = "blocking"))]

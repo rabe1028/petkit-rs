@@ -14,8 +14,9 @@ env:
   CARGO_TERM_COLOR: always
   MSRV: 1.88.0
 
-permissions:
-  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -34,7 +35,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-on-failure: true
-      - run: sh scripts/ci-quality.sh
+      - name: Run quality gate
+        run: sh scripts/ci-quality.sh
 
   msrv:
     name: MSRV
@@ -48,7 +50,8 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-on-failure: true
-      - run: sh scripts/ci-msrv.sh
+      - name: Run MSRV checks
+        run: sh scripts/ci-msrv.sh
 
   minimal-versions:
     name: Minimal Dependencies
@@ -65,4 +68,5 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-on-failure: true
-      - run: sh scripts/ci-minimal-versions.sh
+      - name: Run minimal dependency checks
+        run: sh scripts/ci-minimal-versions.sh
