@@ -360,7 +360,7 @@ fn optional_text_any(
     }
     for name in names {
         match value.to_member(name)?.optional() {
-            Some(member) if member.kind() == JsonValueKind::Null => return Ok(None),
+            Some(member) if member.kind() == JsonValueKind::Null => {}
             Some(member) => return text_value(member).map(Some),
             None => {}
         }
@@ -377,7 +377,7 @@ fn optional_u64_any(
     }
     for name in names {
         match value.to_member(name)?.optional() {
-            Some(member) if member.kind() == JsonValueKind::Null => return Ok(None),
+            Some(member) if member.kind() == JsonValueKind::Null => {}
             Some(member) if member.kind() == JsonValueKind::String => {
                 let raw: String = member.try_into()?;
                 return raw
@@ -464,6 +464,23 @@ mod tests {
             latest_video.video_url.as_deref(),
             Some("https://media.example/redacted/new.mp4")
         );
+    }
+
+    #[test]
+    fn media_aliases_skip_null_values() {
+        let response = with_result(
+            r#"{"result":{"items":[{"eventId":"evt-null","preview1":null,"preview2":"https://media.example/redacted/fallback.jpg","completedAt":null,"eventTime":"1770000200"}]}}"#,
+            |value| MediaListResponse::try_from(value).expect("media list should parse"),
+        );
+
+        let latest = response
+            .latest_image()
+            .expect("fallback image should exist");
+        assert_eq!(
+            latest.image_url.as_deref(),
+            Some("https://media.example/redacted/fallback.jpg")
+        );
+        assert_eq!(latest.timestamp, Some(1_770_000_200));
     }
 
     #[test]

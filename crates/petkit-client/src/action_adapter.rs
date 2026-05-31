@@ -35,8 +35,8 @@ pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction,
             amount: parse_positive_u16(args, "amount")?,
         }),
         "feed_dual" | "manual_feed_dual" => {
-            let amount1 = parse_u16(args, "amount1")?;
-            let amount2 = parse_u16(args, "amount2")?;
+            let amount1 = parse_optional_u16(args, "amount1")?.unwrap_or(0);
+            let amount2 = parse_optional_u16(args, "amount2")?.unwrap_or(0);
             if amount1 == 0 && amount2 == 0 {
                 return Err(PetkitError::InvalidArgument(String::from(
                     "manual_feed_dual needs amount1 or amount2",
@@ -266,6 +266,21 @@ fn parse_u16(args: &[(&str, &str)], key: &'static str) -> Result<u16, PetkitErro
     })
 }
 
+fn parse_optional_u16(
+    args: &[(&str, &str)],
+    key: &'static str,
+) -> Result<Option<u16>, PetkitError> {
+    let Some(value) = arg(args, key) else {
+        return Ok(None);
+    };
+    let value = value.parse::<u64>().map_err(|error| {
+        PetkitError::InvalidArgument(format!("Petkit action `{key}` must be an integer: {error}"))
+    })?;
+    u16::try_from(value).map(Some).map_err(|error| {
+        PetkitError::InvalidArgument(format!("Petkit action `{key}` is out of range: {error}"))
+    })
+}
+
 fn parse_u16_any(args: &[(&str, &str)], keys: &[&'static str]) -> Result<u16, PetkitError> {
     parse_u64_any(args, keys).and_then(|value| {
         u16::try_from(value).map_err(|error| {
@@ -457,6 +472,28 @@ mod tests {
     #[test]
     fn rejects_double_zero_dual_feed() {
         assert!(parse_action("manual_feed_dual", &[("amount1", "0"), ("amount2", "0")]).is_err());
+        assert!(parse_action("manual_feed_dual", &[]).is_err());
+    }
+
+    #[test]
+    fn defaults_missing_dual_feed_hopper_to_zero() {
+        assert_eq!(
+            parse_action("manual_feed_dual", &[("amount1", "5")])
+                .expect("one-sided amount1 should parse"),
+            ParsedAction::FeederManualFeedDual {
+                amount1: 5,
+                amount2: 0
+            }
+        );
+        assert_eq!(
+            parse_action("manual-feed-dual", &[("amount2", "6")])
+                .expect("one-sided amount2 should parse"),
+            ParsedAction::FeederManualFeedDual {
+                amount1: 0,
+                amount2: 6
+            }
+        );
+        assert!(parse_action("manual_feed_dual", &[("amount1", "not-an-int")]).is_err());
     }
 
     #[test]
