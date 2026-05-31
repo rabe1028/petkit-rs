@@ -363,7 +363,7 @@ fn optional_bool_any(
     }
     for name in names {
         match value.to_member(name)?.optional() {
-            Some(member) if member.kind() == JsonValueKind::Null => return Ok(None),
+            Some(member) if member.kind() == JsonValueKind::Null => {}
             Some(member) if member.kind() == JsonValueKind::String => {
                 let raw: String = member.try_into()?;
                 return Ok(Some(matches!(
@@ -397,7 +397,7 @@ fn optional_string_any(
     }
     for name in names {
         match value.to_member(name)?.optional() {
-            Some(member) if member.kind() == JsonValueKind::Null => return Ok(None),
+            Some(member) if member.kind() == JsonValueKind::Null => {}
             Some(member) => return String::try_from(member).map(Some),
             None => {}
         }
@@ -677,6 +677,22 @@ mod tests {
         });
         assert!(response.accepted);
         assert_eq!(response.channel_id, None);
+    }
+
+    #[test]
+    fn live_feed_aliases_skip_null_values() {
+        let response = with_result(
+            r#"{"result":{"channelId":null,"channel_id":"ch-fallback","rtcToken":null,"rtc_token":"rtc-fallback","rtmToken":null,"rtm_token":"rtm-fallback","appRtmUserId":null,"app_rtm_user_id":"app_321","devRtmUserId":null,"dev_rtm_user_id":"dev_654","accepted":null,"success":true}}"#,
+            |value| LiveFeedResponse::try_from(value).expect("live feed should parse"),
+        );
+
+        assert!(response.accepted);
+        assert_eq!(response.channel_id.as_deref(), Some("ch-fallback"));
+        assert_eq!(response.rtc_token.as_deref(), Some("rtc-fallback"));
+        assert_eq!(response.rtm_token.as_deref(), Some("rtm-fallback"));
+        assert_eq!(response.uid, Some(321));
+        assert_eq!(response.app_rtm_user_id.as_deref(), Some("app_321"));
+        assert_eq!(response.dev_rtm_user_id.as_deref(), Some("dev_654"));
     }
 
     #[test]

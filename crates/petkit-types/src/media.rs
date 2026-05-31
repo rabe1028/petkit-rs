@@ -36,7 +36,7 @@ fn media_payload<'text, 'raw>(
         "record",
     ] {
         if let Some(member) = value.to_member(name)?.optional() {
-            if member.kind() == JsonValueKind::Object {
+            if matches!(member.kind(), JsonValueKind::Array | JsonValueKind::Object) {
                 return Ok(member);
             }
         }
@@ -496,6 +496,21 @@ mod tests {
             Some("https://media.example/redacted/fallback.jpg")
         );
         assert_eq!(latest.timestamp, Some(1_770_000_200));
+    }
+
+    #[test]
+    fn media_list_response_unwraps_array_data_payload() {
+        let response = with_result(
+            r#"{"result":{"data":[{"eventId":"evt-array","imageUrl":"https://media.example/redacted/array.jpg","eventTime":1770000250}]}}"#,
+            |value| MediaListResponse::try_from(value).expect("media list should parse"),
+        );
+
+        assert_eq!(response.items.len(), 1);
+        let latest = response.latest_image().expect("array image should exist");
+        assert_eq!(
+            latest.image_url.as_deref(),
+            Some("https://media.example/redacted/array.jpg")
+        );
     }
 
     #[test]
