@@ -25,6 +25,7 @@ The workspace keeps the protocol and type crates lightweight, while `petkit-clie
 | Feature | Purpose |
 | --- | --- |
 | `async` | Enables async client and transport support. |
+| `action-adapter` | Enables the thin action-string parser for sidecar-style commands such as `feed`, `litterbox_clean`, and `purifier_power`. |
 | `blocking` | Enables blocking client and transport support. |
 | `reqwest-async` | Enables the async `reqwest` transport. |
 | `reqwest-blocking` | Enables the blocking `reqwest` transport. |
@@ -32,7 +33,7 @@ The workspace keeps the protocol and type crates lightweight, while `petkit-clie
 | `reqwest-native` | Backwards-compatible umbrella feature that enables both `reqwest` transports. |
 | `rustls-tls` | Backwards-compatible alias for the current `reqwest` transport wiring. |
 
-`petkit-types` and `petkit-protocol` are the `no_std`-friendly crates in this workspace. If you only need request building or protocol modeling, you can depend on those crates without bringing in a transport stack.
+`petkit-types` and `petkit-protocol` are the `no_std`-friendly crates in this workspace. If you only need request building or protocol modeling, you can depend on those crates without bringing in a transport stack. `petkit-client --no-default-features --features async` is also intended for host-provided transports, including `wasm32-wasip2` plugins that call out to a host HTTP capability instead of linking `reqwest` or `ureq`.
 
 ## Examples
 
@@ -55,6 +56,8 @@ To force a specific discovered device, each family also accepts optional
 | `ureq` blocking | feeder | `cargo run -p petkit-client --example ureq_blocking_feeder_detail --no-default-features --features blocking,ureq-blocking` |
 | `ureq` blocking | litter | `cargo run -p petkit-client --example ureq_blocking_litter_detail --no-default-features --features blocking,ureq-blocking` |
 | `ureq` blocking | purifier | `cargo run -p petkit-client --example ureq_blocking_purifier_detail --no-default-features --features blocking,ureq-blocking` |
+| host callback async | canned transport | `cargo run -p petkit-client --example host_callback_async --no-default-features --features async` |
+| host callback blocking | canned transport | `cargo run -p petkit-client --example host_callback_blocking --no-default-features --features blocking` |
 
 Each example logs in, loads `family_list`, picks a feeder/litter/purifier from
 discovery or env vars, builds a concrete `RequestSpec`, reads the broad
@@ -126,6 +129,42 @@ From there you have two common options:
 2. For raw transport control, borrow the request builders through `authenticated_protocol()` or `scope.requests()`, send the `RequestSpec` through the transport directly, then parse with `petkit_protocol::parse_api_response(...)`. Async raw sends need `AsyncTransport` in scope, and blocking raw sends need `BlockingTransport` in scope when calling `client.transport().send(...)`.
 
 This keeps device-specific operations composable while still letting you inject your own networking layer.
+
+## Host callback / Wasm transport
+
+For Wasm plugins or other capability-based hosts, use `HostCallbackTransport` to turn an async host function into the `RequestSpec -> ResponseParts` transport that `AsyncPetkitClient` expects:
+
+```rust
+use petkit_client::host_callback::HostCallbackTransport;
+use petkit_client::AsyncPetkitClient;
+use petkit_protocol::{BaseUrl, RequestSpec, ResponseParts};
+use petkit_types::{ClientContext, ClientProfile};
+
+async fn host_send(request: RequestSpec) -> Result<ResponseParts, HostError> {
+    // Forward method/url/headers/query/form_fields to the host and return its response parts.
+    todo!()
+}
+
+let transport = HostCallbackTransport::from_fn(host_send);
+let client = AsyncPetkitClient::with_session(
+    ClientContext::new(ClientProfile::default(), "UTC", "0"),
+    BaseUrl::Regional("https://api.petkt.com/latest/".into()),
+    "session-id",
+    transport,
+);
+```
+
+If the embedding host exposes a synchronous HTTP capability, use `blocking_host_callback::BlockingHostCallbackTransport` with `BlockingPetkitClient` instead. Both host callback adapters avoid `reqwest` and `ureq`, and neither requires `Send`/`Sync` on the callback, so they can capture plugin-local state.
+
+Camera-capable feeder/litter scopes now expose typed `start_live()` responses with `channel_id`, `rtc_token`, `rtm_token`, `uid`, `app_rtm_user_id`, and `dev_rtm_user_id`. The Agora/WHEP bridge itself remains outside core; keep that in a sidecar or a dedicated integration crate.
+
+Camera-capable feeder/litter client scopes also expose `cloud_video()`, `get_m3u8()`, and `get_download_m3u8()` wrappers returning typed media/M3U8 response structures. Media metadata parsing (`MediaListResponse`, `MediaMetadata`, `latest_image_metadata`, `latest_video_metadata`, plus `MediaListResponse::latest_image/latest_video`) is available for application-owned media list request flows, while download/decrypt/storage remain host responsibilities.
+
+`family_list()` results can be flattened with `flatten_devices` or wrapped in `DeviceCatalog` for numeric, unique, or opaque (`"<device_type>:<device_id>"`) id resolution. `client.authenticated().device_detail_for(&summary)` follows the discovered family/type to the correct typed `device_detail` endpoint.
+
+`IotConfigSet::aliyun_mqtt_connection_summary(...)` builds PetKit/Aliyun MQTT connection data (`client_id`, `username`, HMAC-SHA256 password, and `/user/get`/`/user/update` topics). `petkit-protocol` also exposes raw BLE frame helpers plus a small `BleGattWriter` trait so platform-specific GATT scan/write implementations can stay outside the core crates.
+
+With the optional `action-adapter` feature, sidecar-style action names such as `feed`, `play_sound`, `surplus_level`, `update_setting`, `litterbox_clean`, `purifier_power`, and `fountain_reset_filter` can be parsed into typed command values. Generic `update_setting` parsing returns a `CustomSetting`; callers still choose the device-family endpoint. `camera_ptz` is intentionally out of scope here because it belongs to Agora/RTM signaling rather than PETKIT HTTP commands.
 
 ## Quality commands
 

@@ -15,4 +15,7 @@ std = []
 workspace = true
 
 [dependencies]
+hex.workspace = true
+hmac.workspace = true
 nojson.workspace = true
+sha2.workspace = true

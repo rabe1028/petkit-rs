@@ -1,9 +1,12 @@
-use alloc::string::String;
+use alloc::format;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use hmac::{Hmac, Mac};
 use nojson::{JsonParseError, RawJsonValue};
+use sha2::Sha256;
 
-use crate::DeviceType;
+use crate::{DeviceType, PetkitError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
@@ -83,6 +86,136 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for IotConfigSet {
             ali: optional_member(value.to_member("ali")?)?,
             petkit: optional_member(value.to_member("petkit")?)?,
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AliyunSecureMode {
+    Plain,
+    Tls,
+}
+
+impl AliyunSecureMode {
+    pub const fn secure_mode_value(self) -> &'static str {
+        match self {
+            Self::Plain => "3",
+            Self::Tls => "2",
+        }
+    }
+
+    pub const fn default_port(self) -> u16 {
+        match self {
+            Self::Plain => 1883,
+            Self::Tls => 8883,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AliyunMqttOptions {
+    pub secure_mode: AliyunSecureMode,
+    pub client_id: Option<String>,
+}
+
+impl AliyunMqttOptions {
+    pub const fn new(secure_mode: AliyunSecureMode) -> Self {
+        Self {
+            secure_mode,
+            client_id: None,
+        }
+    }
+
+    pub fn with_client_id(mut self, client_id: impl Into<String>) -> Self {
+        self.client_id = Some(client_id.into());
+        self
+    }
+}
+
+impl Default for AliyunMqttOptions {
+    fn default() -> Self {
+        Self::new(AliyunSecureMode::Plain)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AliyunMqttConnectionSummary {
+    pub broker_id: String,
+    pub host: String,
+    pub port: u16,
+    pub product_key: String,
+    pub device_name: String,
+    pub client_id: String,
+    pub username: String,
+    pub password: String,
+    pub subscribe_topic: String,
+    pub publish_topic: String,
+}
+
+impl IotConfigSet {
+    pub fn preferred_aliyun_device(&self) -> Option<&IotDeviceInfo> {
+        self.petkit.as_ref().or(self.ali.as_ref())
+    }
+
+    pub fn aliyun_mqtt_connection_summary(
+        &self,
+        options: &AliyunMqttOptions,
+    ) -> Result<AliyunMqttConnectionSummary, PetkitError> {
+        self.preferred_aliyun_device()
+            .ok_or_else(|| {
+                PetkitError::InvalidArgument(String::from(
+                    "IoT config does not contain a petkit or ali MQTT device",
+                ))
+            })?
+            .aliyun_mqtt_connection_summary(options)
+    }
+}
+
+impl IotDeviceInfo {
+    pub fn aliyun_mqtt_connection_summary(
+        &self,
+        options: &AliyunMqttOptions,
+    ) -> Result<AliyunMqttConnectionSummary, PetkitError> {
+        let product_key = required_iot_field(self.product_key.as_deref(), "productKey")?;
+        let device_name = required_iot_field(self.device_name.as_deref(), "deviceName")?;
+        let device_secret = required_iot_field(self.device_secret.as_deref(), "deviceSecret")?;
+        let (host, port) = self.mqtt_endpoint(options.secure_mode)?;
+        let raw_client_id = options.client_id.as_deref().unwrap_or(device_name);
+        let content =
+            format!("clientId{raw_client_id}deviceName{device_name}productKey{product_key}");
+        let mut mac = Hmac::<Sha256>::new_from_slice(device_secret.as_bytes())
+            .map_err(|error| PetkitError::InvalidArgument(error.to_string()))?;
+        mac.update(content.as_bytes());
+        let password = hex::encode(mac.finalize().into_bytes());
+        let base = format!("/{product_key}/{device_name}/user");
+
+        Ok(AliyunMqttConnectionSummary {
+            broker_id: String::from("petkit"),
+            host,
+            port,
+            product_key: product_key.to_string(),
+            device_name: device_name.to_string(),
+            client_id: format!(
+                "{raw_client_id}|securemode={},signmethod=hmacsha256|",
+                options.secure_mode.secure_mode_value()
+            ),
+            username: format!("{device_name}&{product_key}"),
+            password,
+            subscribe_topic: format!("{base}/get"),
+            publish_topic: format!("{base}/update"),
+        })
+    }
+
+    fn mqtt_endpoint(&self, secure_mode: AliyunSecureMode) -> Result<(String, u16), PetkitError> {
+        if let Some(mqtt_host) = self.mqtt_host.as_deref() {
+            return parse_mqtt_host(mqtt_host, secure_mode);
+        }
+
+        let product_key = required_iot_field(self.product_key.as_deref(), "productKey")?;
+        let region_id = required_iot_field(self.region_id.as_deref(), "regionId")?;
+        Ok((
+            format!("{product_key}.iot-as-mqtt.{region_id}.aliyuncs.com"),
+            secure_mode.default_port(),
+        ))
     }
 }
 
@@ -179,5 +312,117 @@ where
             .map(T::try_from)
             .collect::<Result<Vec<_>, _>>(),
         None => Ok(Vec::new()),
+    }
+}
+
+fn required_iot_field<'a>(
+    value: Option<&'a str>,
+    field: &'static str,
+) -> Result<&'a str, PetkitError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Err(PetkitError::InvalidArgument(format!(
+            "IoT MQTT config missing {field}"
+        )));
+    };
+    Ok(value)
+}
+
+fn parse_mqtt_host(raw: &str, secure_mode: AliyunSecureMode) -> Result<(String, u16), PetkitError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(PetkitError::InvalidArgument(String::from(
+            "IoT MQTT host must not be empty",
+        )));
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    let without_scheme = ["tcp://", "ssl://", "mqtt://", "mqtts://"]
+        .iter()
+        .find_map(|scheme| {
+            lowered
+                .starts_with(scheme)
+                .then(|| &trimmed[scheme.len()..])
+        })
+        .unwrap_or(trimmed);
+
+    let (host, port) = if let Some((host, port)) = without_scheme.rsplit_once(':') {
+        if port.as_bytes().iter().all(u8::is_ascii_digit) {
+            let parsed = port.parse::<u16>().map_err(|error| {
+                PetkitError::InvalidArgument(format!("invalid IoT MQTT port `{port}`: {error}"))
+            })?;
+            (host, parsed)
+        } else {
+            (without_scheme, secure_mode.default_port())
+        }
+    } else {
+        (without_scheme, secure_mode.default_port())
+    };
+
+    let host = host.trim();
+    if host.is_empty() {
+        return Err(PetkitError::InvalidArgument(format!(
+            "invalid IoT MQTT host `{raw}`"
+        )));
+    }
+    Ok((host.to_string(), port))
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod iot_tests {
+    use super::*;
+
+    #[test]
+    fn aliyun_mqtt_summary_matches_petkit_sidecar_shape() {
+        let config = IotConfigSet {
+            petkit: Some(IotDeviceInfo {
+                mqtt_host: Some(String::from("ssl://mqtt.example:1883")),
+                product_key: Some(String::from("pk123")),
+                device_name: Some(String::from("dn456")),
+                device_secret: Some(String::from("secret789")),
+                ..IotDeviceInfo::default()
+            }),
+            ali: None,
+        };
+
+        let summary = config
+            .aliyun_mqtt_connection_summary(&AliyunMqttOptions::default())
+            .expect("mqtt summary should build");
+
+        assert_eq!(summary.host, "mqtt.example");
+        assert_eq!(summary.port, 1883);
+        assert_eq!(
+            summary.client_id,
+            "dn456|securemode=3,signmethod=hmacsha256|"
+        );
+        assert_eq!(summary.username, "dn456&pk123");
+        assert_eq!(summary.subscribe_topic, "/pk123/dn456/user/get");
+        assert_eq!(summary.publish_topic, "/pk123/dn456/user/update");
+        assert_eq!(
+            summary.password,
+            "9e298bf7d08381ce089fc02b62ebc5fb740bb4622c10678639d84a8c71564ec0"
+        );
+    }
+
+    #[test]
+    fn aliyun_mqtt_summary_can_target_tls_defaults() {
+        let info = IotDeviceInfo {
+            product_key: Some(String::from("pk123")),
+            device_name: Some(String::from("dn456")),
+            device_secret: Some(String::from("secret789")),
+            region_id: Some(String::from("cn-shanghai")),
+            ..IotDeviceInfo::default()
+        };
+
+        let summary = info
+            .aliyun_mqtt_connection_summary(&AliyunMqttOptions::new(AliyunSecureMode::Tls))
+            .expect("tls summary should build");
+
+        assert_eq!(summary.host, "pk123.iot-as-mqtt.cn-shanghai.aliyuncs.com");
+        assert_eq!(summary.port, 8883);
+        assert_eq!(
+            summary.client_id,
+            "dn456|securemode=2,signmethod=hmacsha256|"
+        );
     }
 }

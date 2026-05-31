@@ -18,29 +18,44 @@ use petkit_protocol::{
 use petkit_types::PetkitError;
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_types::{
-    AccountGroup, CalibrationAction, ClientContext, DeviceId, FamilyListResponse, FeedDailyList,
+    flatten_devices, AccountGroup, CalibrationAction, ClientContext, CloudVideoResponse,
+    DeviceCatalog, DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList,
     FeedEntryId, FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
     FeederCancelManualFeedResponse, FeederDeviceDetailResponse, FeederDeviceType,
-    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederPlaySoundResponse,
-    FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse, FeederRestoreDailyFeedResponse,
-    FeederRestoreFeedResponse, FeederSaveFeedResponse, FeederSaveRepeatsResponse,
-    FeederScheduleCompleteResponse, FeederScheduleRemoveResponse, FeederScheduleSaveResponse,
-    FeederSetting, FeederSuspendFeedResponse, FeederUpdateSettingResponse,
-    FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
-    FountainUpdateSettingResponse, IotConfigSet, IotDeviceInfoV1Response, IotDeviceInfoV2Response,
-    LitterControl, LitterControlDeviceResponse, LitterDeviceDetailResponse, LitterDeviceType,
+    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
+    FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
+    FeederRestoreDailyFeedResponse, FeederRestoreFeedResponse, FeederSaveFeedResponse,
+    FeederSaveRepeatsResponse, FeederScheduleCompleteResponse, FeederScheduleRemoveResponse,
+    FeederScheduleSaveResponse, FeederSetting, FeederStartLiveResponse, FeederSuspendFeedResponse,
+    FeederUpdateSettingResponse, FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
+    FountainUpdateSettingResponse, GetDownloadM3u8Response, GetM3u8Response, IotConfigSet,
+    IotDeviceInfoV1Response, IotDeviceInfoV2Response, LitterControl, LitterControlDeviceResponse,
+    LitterDeviceDetailResponse, LitterDeviceType, LitterOpenCameraResponse,
     LitterResetN50DeodorizerResponse, LitterScheduleCompleteResponse, LitterScheduleRemoveResponse,
-    LitterScheduleSaveResponse, LitterSetting, LitterUpdateSettingResponse, LoginResponse, PetId,
-    PetUpdateSettingResponse, PetkitDay, PurifierControl, PurifierControlDeviceResponse,
-    PurifierDeviceDetailResponse, PurifierDeviceType, PurifierSetting,
-    PurifierUpdateSettingResponse, RefreshSessionResponse, RegionServersPayload,
-    RegionServersResponse, RepeatSchedule, RequestLoginCodeResponse, Session, SoundId,
+    LitterScheduleSaveResponse, LitterSetting, LitterStartLiveResponse,
+    LitterUpdateSettingResponse, LoginResponse, PetId, PetUpdateSettingResponse, PetkitDay,
+    PurifierControl, PurifierControlDeviceResponse, PurifierDeviceDetailResponse,
+    PurifierDeviceType, PurifierSetting, PurifierUpdateSettingResponse, RefreshSessionResponse,
+    RegionServersPayload, RegionServersResponse, RepeatSchedule, RequestLoginCodeResponse, Session,
+    SoundId,
 };
+
+#[cfg(feature = "action-adapter")]
+pub mod action_adapter;
 
 #[derive(Debug)]
 pub enum ClientError<E> {
     Transport(E),
     Protocol(PetkitError),
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiscoveredDeviceDetail {
+    Feeder(FeederDeviceDetailResponse),
+    Litter(LitterDeviceDetailResponse),
+    Fountain(FountainDeviceDetailResponse),
+    Purifier(PurifierDeviceDetailResponse),
 }
 
 impl<E> From<PetkitError> for ClientError<E> {
@@ -70,7 +85,7 @@ pub trait AsyncTransport {
     fn send(
         &self,
         request: RequestSpec,
-    ) -> impl core::future::Future<Output = Result<ResponseParts, Self::Error>> + Send;
+    ) -> impl core::future::Future<Output = Result<ResponseParts, Self::Error>>;
 }
 
 #[cfg(feature = "blocking")]
@@ -139,8 +154,7 @@ impl<T> AsyncPetkitClient<T> {
 #[cfg(feature = "async")]
 impl<T> AsyncPetkitClient<T>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
 {
     pub async fn fetch_region_servers(
         &self,
@@ -205,6 +219,16 @@ where
     pub async fn family_list(&self) -> Result<Vec<AccountGroup>, ClientError<T::Error>> {
         let response: FamilyListResponse = self.execute_typed(self.auth.family_list()).await?;
         Ok(response.into())
+    }
+
+    pub async fn device_list(&self) -> Result<Vec<DeviceSummary>, ClientError<T::Error>> {
+        let groups = self.family_list().await?;
+        Ok(flatten_devices(&groups))
+    }
+
+    pub async fn device_catalog(&self) -> Result<DeviceCatalog, ClientError<T::Error>> {
+        let groups = self.family_list().await?;
+        Ok(DeviceCatalog::from_groups(&groups))
     }
 
     pub async fn iot_device_info_v1(&self) -> Result<IotConfigSet, ClientError<T::Error>> {
@@ -349,6 +373,16 @@ where
         Ok(response.into())
     }
 
+    pub fn device_list(&self) -> Result<Vec<DeviceSummary>, ClientError<T::Error>> {
+        let groups = self.family_list()?;
+        Ok(flatten_devices(&groups))
+    }
+
+    pub fn device_catalog(&self) -> Result<DeviceCatalog, ClientError<T::Error>> {
+        let groups = self.family_list()?;
+        Ok(DeviceCatalog::from_groups(&groups))
+    }
+
     pub fn iot_device_info_v1(&self) -> Result<IotConfigSet, ClientError<T::Error>> {
         let response: IotDeviceInfoV1Response =
             self.execute_typed(self.auth.iot_device_info_v1())?;
@@ -473,6 +507,48 @@ impl<'a, T> AsyncAuthenticatedClient<'a, T> {
     }
 }
 
+#[cfg(feature = "async")]
+impl<T> AsyncAuthenticatedClient<'_, T>
+where
+    T: AsyncTransport,
+{
+    pub async fn device_detail_for(
+        &self,
+        device: &DeviceSummary,
+    ) -> Result<DiscoveredDeviceDetail, ClientError<T::Error>> {
+        let device_id = device.device_id_value()?;
+        match device.device_type.clone().into_family() {
+            DeviceFamilyKind::Feeder(device_type) => self
+                .feeder(device_type, device_id)
+                .device_detail()
+                .await
+                .map(DiscoveredDeviceDetail::Feeder),
+            DeviceFamilyKind::Litter(device_type) => self
+                .litter(device_type, device_id)
+                .device_detail()
+                .await
+                .map(DiscoveredDeviceDetail::Litter),
+            DeviceFamilyKind::Fountain(device_type) => self
+                .fountain(device_type, device_id)
+                .device_detail()
+                .await
+                .map(DiscoveredDeviceDetail::Fountain),
+            DeviceFamilyKind::Purifier(device_type) => self
+                .purifier(device_type, device_id)
+                .device_detail()
+                .await
+                .map(DiscoveredDeviceDetail::Purifier),
+            DeviceFamilyKind::Cozy | DeviceFamilyKind::Pet | DeviceFamilyKind::Unknown(_) => {
+                Err(PetkitError::InvalidArgument(format!(
+                    "device `{}` does not have a supported device_detail scope",
+                    device.device_type.as_str()
+                ))
+                .into())
+            }
+        }
+    }
+}
+
 #[cfg(feature = "blocking")]
 #[derive(Debug)]
 pub struct BlockingAuthenticatedClient<'a, T> {
@@ -571,6 +647,44 @@ impl<'a, T> BlockingAuthenticatedClient<'a, T> {
     }
 }
 
+#[cfg(feature = "blocking")]
+impl<T> BlockingAuthenticatedClient<'_, T>
+where
+    T: BlockingTransport,
+{
+    pub fn device_detail_for(
+        &self,
+        device: &DeviceSummary,
+    ) -> Result<DiscoveredDeviceDetail, ClientError<T::Error>> {
+        let device_id = device.device_id_value()?;
+        match device.device_type.clone().into_family() {
+            DeviceFamilyKind::Feeder(device_type) => self
+                .feeder(device_type, device_id)
+                .device_detail()
+                .map(DiscoveredDeviceDetail::Feeder),
+            DeviceFamilyKind::Litter(device_type) => self
+                .litter(device_type, device_id)
+                .device_detail()
+                .map(DiscoveredDeviceDetail::Litter),
+            DeviceFamilyKind::Fountain(device_type) => self
+                .fountain(device_type, device_id)
+                .device_detail()
+                .map(DiscoveredDeviceDetail::Fountain),
+            DeviceFamilyKind::Purifier(device_type) => self
+                .purifier(device_type, device_id)
+                .device_detail()
+                .map(DiscoveredDeviceDetail::Purifier),
+            DeviceFamilyKind::Cozy | DeviceFamilyKind::Pet | DeviceFamilyKind::Unknown(_) => {
+                Err(PetkitError::InvalidArgument(format!(
+                    "device `{}` does not have a supported device_detail scope",
+                    device.device_type.as_str()
+                ))
+                .into())
+            }
+        }
+    }
+}
+
 #[cfg(feature = "async")]
 #[derive(Debug)]
 pub struct AsyncFeederClient<'a, T, M = DynamicFeeder> {
@@ -597,8 +711,7 @@ impl<T, M> AsyncFeederClient<'_, T, M> {
 #[cfg(feature = "async")]
 impl<T, M> AsyncFeederClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
 {
     pub async fn device_detail(&self) -> Result<FeederDeviceDetailResponse, ClientError<T::Error>> {
         self.client
@@ -709,8 +822,7 @@ where
 #[cfg(feature = "async")]
 impl<T, M> AsyncFeederClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
     M: FeederModel,
 {
     pub async fn manual_feed<A>(
@@ -730,8 +842,7 @@ where
 #[cfg(feature = "async")]
 impl<T, M> AsyncFeederClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
     M: FeederSupportsFoodReplenished,
 {
     pub async fn food_replenished(
@@ -746,8 +857,7 @@ where
 #[cfg(feature = "async")]
 impl<T, M> AsyncFeederClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
     M: FeederSupportsCalibration,
 {
     pub async fn calibration(
@@ -763,8 +873,7 @@ where
 #[cfg(feature = "async")]
 impl<T, M> AsyncFeederClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
     M: FeederSupportsCallPet,
 {
     pub async fn call_pet(&self) -> Result<FeederCallPetResponse, ClientError<T::Error>> {
@@ -775,8 +884,7 @@ where
 #[cfg(feature = "async")]
 impl<T, M> AsyncFeederClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
     M: FeederSupportsSound,
 {
     pub async fn play_sound(
@@ -800,6 +908,49 @@ where
 
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
+    }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
+}
+
+#[cfg(feature = "async")]
+impl<T, M> AsyncFeederClient<'_, T, M>
+where
+    T: AsyncTransport,
+    M: FeederSupportsCamera,
+{
+    pub async fn open_camera(&self) -> Result<FeederOpenCameraResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.open_camera_request()).await
+    }
+
+    pub async fn start_live(&self) -> Result<FeederStartLiveResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.start_live_request()).await
+    }
+
+    pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request()).await
+    }
+
+    pub async fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request()).await
+    }
+
+    pub async fn get_download_m3u8(
+        &self,
+    ) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.get_download_m3u8_request())
+            .await
     }
 }
 
@@ -998,6 +1149,45 @@ where
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
     }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
+}
+
+#[cfg(feature = "blocking")]
+impl<T, M> BlockingFeederClient<'_, T, M>
+where
+    T: BlockingTransport,
+    M: FeederSupportsCamera,
+{
+    pub fn open_camera(&self) -> Result<FeederOpenCameraResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.open_camera_request())
+    }
+
+    pub fn start_live(&self) -> Result<FeederStartLiveResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.start_live_request())
+    }
+
+    pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request())
+    }
+
+    pub fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request())
+    }
+
+    pub fn get_download_m3u8(&self) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_download_m3u8_request())
+    }
 }
 
 #[cfg(feature = "async")]
@@ -1026,8 +1216,7 @@ impl<T, M> AsyncLitterClient<'_, T, M> {
 #[cfg(feature = "async")]
 impl<T, M> AsyncLitterClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
 {
     pub async fn device_detail(&self) -> Result<LitterDeviceDetailResponse, ClientError<T::Error>> {
         self.client
@@ -1079,8 +1268,7 @@ where
 #[cfg(feature = "async")]
 impl<T, M> AsyncLitterClient<'_, T, M>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
     M: LitterSupportsN50Deodorizer,
 {
     pub async fn reset_n50_deodorizer(
@@ -1103,6 +1291,49 @@ where
 
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
+    }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
+}
+
+#[cfg(feature = "async")]
+impl<T, M> AsyncLitterClient<'_, T, M>
+where
+    T: AsyncTransport,
+    M: LitterSupportsCamera,
+{
+    pub async fn open_camera(&self) -> Result<LitterOpenCameraResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.open_camera_request()).await
+    }
+
+    pub async fn start_live(&self) -> Result<LitterStartLiveResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.start_live_request()).await
+    }
+
+    pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request()).await
+    }
+
+    pub async fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request()).await
+    }
+
+    pub async fn get_download_m3u8(
+        &self,
+    ) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.get_download_m3u8_request())
+            .await
     }
 }
 
@@ -1196,6 +1427,45 @@ where
     pub fn start_live_request(&self) -> RequestSpec {
         self.requests().start_live()
     }
+
+    pub fn cloud_video_request(&self) -> RequestSpec {
+        self.requests().cloud_video()
+    }
+
+    pub fn get_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_m3u8()
+    }
+
+    pub fn get_download_m3u8_request(&self) -> RequestSpec {
+        self.requests().get_download_m3u8()
+    }
+}
+
+#[cfg(feature = "blocking")]
+impl<T, M> BlockingLitterClient<'_, T, M>
+where
+    T: BlockingTransport,
+    M: LitterSupportsCamera,
+{
+    pub fn open_camera(&self) -> Result<LitterOpenCameraResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.open_camera_request())
+    }
+
+    pub fn start_live(&self) -> Result<LitterStartLiveResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.start_live_request())
+    }
+
+    pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
+        self.client.execute_typed(self.cloud_video_request())
+    }
+
+    pub fn get_m3u8(&self) -> Result<GetM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_m3u8_request())
+    }
+
+    pub fn get_download_m3u8(&self) -> Result<GetDownloadM3u8Response, ClientError<T::Error>> {
+        self.client.execute_typed(self.get_download_m3u8_request())
+    }
 }
 
 #[cfg(feature = "async")]
@@ -1220,8 +1490,7 @@ impl<T> AsyncFountainClient<'_, T> {
 #[cfg(feature = "async")]
 impl<T> AsyncFountainClient<'_, T>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
 {
     pub async fn device_detail(
         &self,
@@ -1300,8 +1569,7 @@ impl<T> AsyncPurifierClient<'_, T> {
 #[cfg(feature = "async")]
 impl<T> AsyncPurifierClient<'_, T>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
 {
     pub async fn device_detail(
         &self,
@@ -1392,8 +1660,7 @@ impl<T> AsyncPetClient<'_, T> {
 #[cfg(feature = "async")]
 impl<T> AsyncPetClient<'_, T>
 where
-    T: AsyncTransport + Sync,
-    T::Error: Send,
+    T: AsyncTransport,
 {
     pub async fn update_setting(
         &self,
@@ -1535,6 +1802,159 @@ impl BlockingPetkitClient<ureq_blocking::UreqBlockingTransport> {
     }
 }
 
+#[cfg(feature = "async")]
+pub mod host_callback {
+    use core::fmt;
+    use core::future::Future;
+
+    use petkit_protocol::{RequestSpec, ResponseParts};
+
+    use super::AsyncTransport;
+
+    pub trait HostCallback {
+        type Error;
+
+        fn call(
+            &self,
+            request: RequestSpec,
+        ) -> impl Future<Output = Result<ResponseParts, Self::Error>>;
+    }
+
+    pub struct HostCallbackTransport<C> {
+        callback: C,
+    }
+
+    impl<C> HostCallbackTransport<C> {
+        pub fn new(callback: C) -> Self {
+            Self { callback }
+        }
+
+        pub fn callback(&self) -> &C {
+            &self.callback
+        }
+    }
+
+    impl<F> HostCallbackTransport<FnHostCallback<F>> {
+        pub fn from_fn(callback: F) -> Self {
+            Self::new(FnHostCallback(callback))
+        }
+    }
+
+    impl<C> fmt::Debug for HostCallbackTransport<C> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("HostCallbackTransport").finish()
+        }
+    }
+
+    impl<C> AsyncTransport for HostCallbackTransport<C>
+    where
+        C: HostCallback,
+    {
+        type Error = C::Error;
+
+        fn send(
+            &self,
+            request: RequestSpec,
+        ) -> impl Future<Output = Result<ResponseParts, Self::Error>> {
+            self.callback.call(request)
+        }
+    }
+
+    pub struct FnHostCallback<F>(F);
+
+    impl<F> fmt::Debug for FnHostCallback<F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("FnHostCallback").finish()
+        }
+    }
+
+    impl<F, Fut, E> HostCallback for FnHostCallback<F>
+    where
+        F: Fn(RequestSpec) -> Fut,
+        Fut: Future<Output = Result<ResponseParts, E>>,
+    {
+        type Error = E;
+
+        fn call(
+            &self,
+            request: RequestSpec,
+        ) -> impl Future<Output = Result<ResponseParts, Self::Error>> {
+            (self.0)(request)
+        }
+    }
+}
+
+#[cfg(feature = "blocking")]
+pub mod blocking_host_callback {
+    use core::fmt;
+
+    use petkit_protocol::{RequestSpec, ResponseParts};
+
+    use super::BlockingTransport;
+
+    pub trait BlockingHostCallback {
+        type Error;
+
+        fn call(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error>;
+    }
+
+    pub struct BlockingHostCallbackTransport<C> {
+        callback: C,
+    }
+
+    impl<C> BlockingHostCallbackTransport<C> {
+        pub fn new(callback: C) -> Self {
+            Self { callback }
+        }
+
+        pub fn callback(&self) -> &C {
+            &self.callback
+        }
+    }
+
+    impl<F> BlockingHostCallbackTransport<FnBlockingHostCallback<F>> {
+        pub fn from_fn(callback: F) -> Self {
+            Self::new(FnBlockingHostCallback(callback))
+        }
+    }
+
+    impl<C> fmt::Debug for BlockingHostCallbackTransport<C> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("BlockingHostCallbackTransport").finish()
+        }
+    }
+
+    impl<C> BlockingTransport for BlockingHostCallbackTransport<C>
+    where
+        C: BlockingHostCallback,
+    {
+        type Error = C::Error;
+
+        fn send(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error> {
+            self.callback.call(request)
+        }
+    }
+
+    pub struct FnBlockingHostCallback<F>(F);
+
+    impl<F> fmt::Debug for FnBlockingHostCallback<F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("FnBlockingHostCallback").finish()
+        }
+    }
+
+    impl<F, E> BlockingHostCallback for FnBlockingHostCallback<F>
+    where
+        F: Fn(RequestSpec) -> Result<ResponseParts, E>,
+    {
+        type Error = E;
+
+        fn call(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error> {
+            (self.0)(request)
+        }
+    }
+}
+
 // ---------- Reqwest adapters ----------
 
 #[cfg(any(
@@ -1612,8 +2032,7 @@ pub mod reqwest_async {
         fn send(
             &self,
             request: RequestSpec,
-        ) -> impl Future<Output = Result<petkit_protocol::ResponseParts, Self::Error>> + Send
-        {
+        ) -> impl Future<Output = Result<petkit_protocol::ResponseParts, Self::Error>> {
             let client = self.client.clone();
             let url = request.url().to_owned();
             let RequestSpec {
@@ -1868,20 +2287,30 @@ pub mod ureq_blocking {
 mod tests {
     use std::sync::Mutex;
 
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    use std::cell::RefCell;
     #[cfg(feature = "async")]
     use std::future::{ready, Future};
+    #[cfg(any(feature = "async", feature = "blocking"))]
+    use std::rc::Rc;
 
     #[cfg(feature = "async")]
     use futures::executor::block_on;
 
-    use petkit_protocol::{BaseUrl, RequestSpec, ResponseParts};
+    use petkit_protocol::{
+        BaseUrl, D4shFeeder, Header, HttpMethod, RequestSpec, ResponseParts, T6Litter,
+    };
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
-    use petkit_types::{ClientContext, ClientProfile};
+    use petkit_types::{ClientContext, ClientProfile, DeviceId, DeviceSummary, DeviceType};
 
+    #[cfg(feature = "blocking")]
+    use super::blocking_host_callback::BlockingHostCallbackTransport;
     use super::hash_password_md5;
     #[cfg(feature = "async")]
-    use super::{AsyncPetkitClient, AsyncTransport};
+    use super::host_callback::HostCallbackTransport;
+    #[cfg(feature = "async")]
+    use super::{AsyncPetkitClient, AsyncTransport, DiscoveredDeviceDetail};
     #[cfg(feature = "blocking")]
     use super::{BlockingPetkitClient, BlockingTransport};
 
@@ -1919,7 +2348,7 @@ mod tests {
         fn send(
             &self,
             request: RequestSpec,
-        ) -> impl Future<Output = Result<ResponseParts, Self::Error>> + Send {
+        ) -> impl Future<Output = Result<ResponseParts, Self::Error>> {
             self.last_request
                 .lock()
                 .expect("request mutex should not be poisoned")
@@ -2084,6 +2513,80 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_host_callback_transport_forwards_request_spec() {
+        let seen = Rc::new(RefCell::new(None));
+        let transport = BlockingHostCallbackTransport::from_fn({
+            let seen = Rc::clone(&seen);
+            move |request: RequestSpec| {
+                seen.borrow_mut().replace(request);
+                Ok::<_, std::convert::Infallible>(ResponseParts::new(
+                    200,
+                    vec![Header::new("X-Host", "ok")],
+                    br#"{"result":true}"#.to_vec(),
+                ))
+            }
+        });
+        let request = RequestSpec::new(
+            HttpMethod::Post,
+            &BaseUrl::Absolute("https://host.example/api".into()),
+            "device/action",
+        )
+        .push_header("X-Test", "forwarded")
+        .push_query("q", "1")
+        .push_form_field("deviceId", "42")
+        .push_form_field("payload", "redacted");
+
+        let response = transport
+            .send(request.clone())
+            .expect("host call should work");
+        let captured = seen
+            .borrow()
+            .clone()
+            .expect("request should be forwarded to callback");
+
+        assert_eq!(response.body, br#"{"result":true}"#);
+        assert_eq!(captured.method, request.method);
+        assert_eq!(captured.url, request.url);
+        assert_eq!(captured.headers, request.headers);
+        assert_eq!(captured.query, request.query);
+        assert_eq!(captured.form_fields, request.form_fields);
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_camera_media_helpers_execute_typed_responses() {
+        let transport = MockBlockingTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(
+                200,
+                vec![],
+                br#"{"result":{"data":{"downloadUrl":"https://media.example/redacted/download.m3u8","aesKey":"aes-redacted"}}}"#.to_vec(),
+            ),
+        };
+        let client = BlockingPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+
+        let response = client
+            .authenticated()
+            .litter_typed::<T6Litter>(DeviceId::new(42).expect("device id should be valid"))
+            .get_download_m3u8()
+            .expect("download m3u8 should parse");
+
+        assert_eq!(
+            response.primary_url(),
+            Some("https://media.example/redacted/download.m3u8")
+        );
+        let request = client
+            .transport
+            .last_request
+            .lock()
+            .expect("request mutex should not be poisoned")
+            .clone()
+            .expect("m3u8 request should be captured");
+        assert_eq!(request.path, "t6/getDownloadM3u8");
+    }
+
     #[cfg(feature = "async")]
     #[test]
     fn async_client_request_login_code_propagates_false() {
@@ -2140,6 +2643,69 @@ mod tests {
 
     #[cfg(feature = "async")]
     #[test]
+    fn async_client_host_callback_transport_supports_local_state() {
+        let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+        let transport = HostCallbackTransport::from_fn({
+            let seen = Rc::clone(&seen);
+            move |request: RequestSpec| {
+                seen.borrow_mut().push(request.path.clone());
+                ready(Ok::<_, std::convert::Infallible>(ResponseParts::new(
+                    200,
+                    vec![],
+                    br#"{"result":[{"deviceList":[{"deviceId":42,"deviceName":"feeder","deviceType":"d4s","groupId":1,"type":10,"typeCode":20,"uniqueId":"u-42"}],"groupId":1,"name":"home","petList":[]}]}"#.to_vec(),
+                )))
+            }
+        });
+        let client = AsyncPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+
+        let devices = block_on(client.device_list()).expect("device list should parse");
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].opaque_id(), "d4s:42");
+        assert_eq!(
+            seen.borrow().as_slice(),
+            &[String::from("group/family/list")]
+        );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_authenticated_client_reads_detail_from_device_summary() {
+        let transport = MockAsyncTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(
+                200,
+                vec![],
+                br#"{"result":{"id":42,"name":"feeder","settings":{"lightMode":1},"state":{"food":80}}}"#.to_vec(),
+            ),
+        };
+        let client = AsyncPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("feeder")),
+            device_type: DeviceType::D4s,
+            group_id: 1,
+            device_type_id: Some(10),
+            type_code: Some(20),
+            unique_id: String::from("u-42"),
+        };
+
+        let detail = block_on(client.authenticated().device_detail_for(&summary))
+            .expect("device detail should parse");
+
+        assert!(matches!(detail, DiscoveredDeviceDetail::Feeder(_)));
+        let request = client
+            .transport
+            .last_request
+            .lock()
+            .expect("request mutex should not be poisoned")
+            .clone()
+            .expect("detail request should be captured");
+        assert_eq!(request.path, "d4s/device_detail");
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
     fn async_client_parses_iot_config() {
         let transport = MockAsyncTransport {
             last_request: Mutex::new(None),
@@ -2173,5 +2739,41 @@ mod tests {
                 petkit: None,
             }
         );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_camera_media_helpers_execute_typed_responses() {
+        let transport = MockAsyncTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(
+                200,
+                vec![],
+                br#"{"result":{"data":{"mediaApi":"https://media.example/redacted/cloud.m3u8","aesKey":"aes-redacted"}}}"#.to_vec(),
+            ),
+        };
+        let client = AsyncPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+
+        let response = block_on(
+            client
+                .authenticated()
+                .feeder_typed::<D4shFeeder>(DeviceId::new(42).expect("device id should be valid"))
+                .cloud_video(),
+        )
+        .expect("cloud video should parse");
+
+        assert_eq!(
+            response.media_api.as_deref(),
+            Some("https://media.example/redacted/cloud.m3u8")
+        );
+        assert_eq!(response.aes_key.as_deref(), Some("aes-redacted"));
+        let request = client
+            .transport
+            .last_request
+            .lock()
+            .expect("request mutex should not be poisoned")
+            .clone()
+            .expect("cloud video request should be captured");
+        assert_eq!(request.path, "d4sh/cloud/video");
     }
 }

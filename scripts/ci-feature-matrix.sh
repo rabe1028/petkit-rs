@@ -3,8 +3,12 @@ set -eu
 
 cargo check -p petkit-client --lib --no-default-features
 cargo check -p petkit-client --lib --no-default-features --features async
+cargo check -p petkit-client --lib --target wasm32-wasip2 --no-default-features --features async
 cargo check -p petkit-client --lib --no-default-features --features blocking
 cargo check -p petkit-client --lib --no-default-features --features async,blocking
+cargo check -p petkit-client --lib --no-default-features --features action-adapter
+cargo check -p petkit-client --example host_callback_async --no-default-features --features async
+cargo check -p petkit-client --example host_callback_blocking --no-default-features --features blocking
 cargo check -p petkit-client --examples --no-default-features --features async,reqwest-async
 cargo check -p petkit-client --examples --no-default-features --features blocking,reqwest-blocking
 cargo check -p petkit-client --examples --no-default-features --features blocking,ureq-blocking
