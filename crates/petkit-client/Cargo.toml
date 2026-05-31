@@ -10,6 +10,7 @@ description = "std transport adapters and high-level clients for petkit-rs"
 [features]
 default = ["async", "blocking"]
 async = []
+action-adapter = []
 blocking = []
 # Enables the bundled reqwest transports. PetKit hosts only serve HTTPS, so a
 # TLS backend is required; rustls is wired in by default. gzip/deflate are
@@ -41,3 +42,7 @@ ureq = { version = "2.10", default-features = false, features = ["tls", "gzip"],
 [dev-dependencies]
 futures = { version = "0.3.31", default-features = false, features = ["executor"] }
 tokio = { version = "1.28.1", features = ["rt", "rt-multi-thread", "macros"] }
+
+[[example]]
+name = "host_callback_async"
+required-features = ["async"]

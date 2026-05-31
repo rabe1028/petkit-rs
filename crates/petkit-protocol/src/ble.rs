@@ -2,6 +2,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use core::fmt;
+
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use percent_encoding::{percent_encode, AsciiSet, CONTROLS};
 use petkit_types::{FountainAction, PetkitError};
@@ -15,6 +17,37 @@ const BLE_DATA_ENCODE_SET: &AsciiSet = &CONTROLS.add(b'+').add(b'/').add(b'=');
 pub struct BleEncodedCommand {
     pub cmd: u8,
     pub data: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BleFrameCommand {
+    pub cmd: u8,
+    pub frame: Vec<u8>,
+    pub data: String,
+}
+
+pub trait BleGattWriter {
+    type Error;
+
+    fn write_frame(&mut self, frame: &[u8]) -> Result<(), Self::Error>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BleGattWriteError<E> {
+    Build(PetkitError),
+    Transport(E),
+}
+
+impl<E> fmt::Display for BleGattWriteError<E>
+where
+    E: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Build(error) => write!(f, "failed to build BLE frame: {error}"),
+            Self::Transport(error) => write!(f, "failed to write BLE frame: {error}"),
+        }
+    }
 }
 
 pub fn build_ble_frame(command: &[u8], counter: u8) -> Vec<u8> {
@@ -42,6 +75,17 @@ pub fn build_fountain_ble_command(
     action: FountainAction,
     counter: u8,
 ) -> Result<BleEncodedCommand, PetkitError> {
+    let command = build_fountain_ble_frame_command(action, counter)?;
+    Ok(BleEncodedCommand {
+        cmd: command.cmd,
+        data: command.data,
+    })
+}
+
+pub fn build_fountain_ble_frame_command(
+    action: FountainAction,
+    counter: u8,
+) -> Result<BleFrameCommand, PetkitError> {
     let command = match action {
         FountainAction::Pause => &[220, 1, 3, 0, 1, 0, 2][..],
         FountainAction::Continue => &[220, 1, 3, 0, 1, 1, 2][..],
@@ -61,8 +105,26 @@ pub fn build_fountain_ble_command(
     };
 
     let frame = build_ble_frame(command, counter);
-    Ok(BleEncodedCommand {
+    let data = encode_ble_data(&frame);
+    Ok(BleFrameCommand {
         cmd: command[0],
-        data: encode_ble_data(&frame),
+        frame,
+        data,
     })
+}
+
+pub fn write_fountain_ble_frame<W>(
+    writer: &mut W,
+    action: FountainAction,
+    counter: u8,
+) -> Result<BleFrameCommand, BleGattWriteError<W::Error>>
+where
+    W: BleGattWriter,
+{
+    let command =
+        build_fountain_ble_frame_command(action, counter).map_err(BleGattWriteError::Build)?;
+    writer
+        .write_frame(&command.frame)
+        .map_err(BleGattWriteError::Transport)?;
+    Ok(command)
 }

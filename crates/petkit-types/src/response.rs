@@ -259,6 +259,44 @@ pub type PurifierSettingsReadResponse = PurifierDeviceDetailResponse;
 
 pub type PetUpdateSettingResponse = UpdateSettingResponse;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveFeedResponse {
+    pub accepted: bool,
+    pub channel_id: Option<String>,
+    pub rtc_token: Option<String>,
+    pub rtm_token: Option<String>,
+    pub uid: Option<u32>,
+    pub app_rtm_user_id: Option<String>,
+    pub dev_rtm_user_id: Option<String>,
+}
+
+impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LiveFeedResponse {
+    type Error = JsonParseError;
+
+    fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let payload = live_feed_payload(value)?;
+        let app_rtm_user_id = optional_string_any(payload, &["appRtmUserId", "app_rtm_user_id"])?;
+        let uid = optional_u32_any(payload, &["uid"])?
+            .or_else(|| uid_from_rtm_user_id(app_rtm_user_id.as_deref()));
+        Ok(Self {
+            accepted: truthy(value)?,
+            channel_id: optional_string_any(payload, &["channelId", "channel_id"])?,
+            rtc_token: optional_string_any(payload, &["rtcToken", "rtc_token"])?,
+            rtm_token: optional_string_any(payload, &["rtmToken", "rtm_token"])?,
+            uid,
+            app_rtm_user_id,
+            dev_rtm_user_id: optional_string_any(payload, &["devRtmUserId", "dev_rtm_user_id"])?,
+        })
+    }
+}
+
+pub type StartLiveResponse = LiveFeedResponse;
+pub type FeederStartLiveResponse = StartLiveResponse;
+pub type LitterStartLiveResponse = StartLiveResponse;
+pub type OpenCameraResponse = LiveFeedResponse;
+pub type FeederOpenCameraResponse = OpenCameraResponse;
+pub type LitterOpenCameraResponse = OpenCameraResponse;
+
 fn optional_u64_member<'text, 'raw, 'a>(
     member: nojson::RawJsonMember<'text, 'raw, 'a>,
 ) -> Result<Option<u64>, JsonParseError> {
@@ -275,6 +313,37 @@ fn optional_u64_member<'text, 'raw, 'a>(
     }
 }
 
+fn optional_u32_member<'text, 'raw, 'a>(
+    member: nojson::RawJsonMember<'text, 'raw, 'a>,
+) -> Result<Option<u32>, JsonParseError> {
+    match member.optional() {
+        Some(value) if value.kind() == JsonValueKind::Null => Ok(None),
+        Some(value) if value.kind() == JsonValueKind::String => {
+            let raw: String = value.try_into()?;
+            raw.parse::<u32>()
+                .map(Some)
+                .map_err(|error| value.invalid(error))
+        }
+        Some(value) => u32::try_from(value).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn optional_u32_any(
+    value: RawJsonValue<'_, '_>,
+    names: &[&str],
+) -> Result<Option<u32>, JsonParseError> {
+    if value.kind() != JsonValueKind::Object {
+        return Ok(None);
+    }
+    for name in names {
+        if let Some(value) = optional_u32_member(value.to_member(name)?)? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
 fn optional_string_member<'text, 'raw, 'a>(
     member: nojson::RawJsonMember<'text, 'raw, 'a>,
 ) -> Result<Option<String>, JsonParseError> {
@@ -283,6 +352,43 @@ fn optional_string_member<'text, 'raw, 'a>(
         Some(value) => String::try_from(value).map(Some),
         None => Ok(None),
     }
+}
+
+fn optional_string_any(
+    value: RawJsonValue<'_, '_>,
+    names: &[&str],
+) -> Result<Option<String>, JsonParseError> {
+    if value.kind() != JsonValueKind::Object {
+        return Ok(None);
+    }
+    for name in names {
+        match value.to_member(name)?.optional() {
+            Some(member) if member.kind() == JsonValueKind::Null => return Ok(None),
+            Some(member) => return String::try_from(member).map(Some),
+            None => {}
+        }
+    }
+    Ok(None)
+}
+
+fn live_feed_payload<'text, 'raw>(
+    value: RawJsonValue<'text, 'raw>,
+) -> Result<RawJsonValue<'text, 'raw>, JsonParseError> {
+    if value.kind() != JsonValueKind::Object {
+        return Ok(value);
+    }
+    for name in ["data", "live", "liveFeed", "live_feed"] {
+        if let Some(member) = value.to_member(name)?.optional() {
+            if member.kind() == JsonValueKind::Object {
+                return Ok(member);
+            }
+        }
+    }
+    Ok(value)
+}
+
+fn uid_from_rtm_user_id(value: Option<&str>) -> Option<u32> {
+    value?.split('_').find_map(|part| part.parse::<u32>().ok())
 }
 
 fn optional_text_member<'text, 'raw, 'a>(
@@ -478,5 +584,42 @@ mod tests {
                 .text(),
             "2"
         );
+    }
+
+    #[test]
+    fn live_feed_response_parses_agora_tokens_and_uid_aliases() {
+        let response = with_result(
+            r#"{"result":{"channelId":"ch-1","rtcToken":"rtc","rtmToken":"rtm","appRtmUserId":"app_123","devRtmUserId":"dev_456"}}"#,
+            |value| LiveFeedResponse::try_from(value).expect("live feed should parse"),
+        );
+
+        assert!(response.accepted);
+        assert_eq!(response.channel_id.as_deref(), Some("ch-1"));
+        assert_eq!(response.rtc_token.as_deref(), Some("rtc"));
+        assert_eq!(response.rtm_token.as_deref(), Some("rtm"));
+        assert_eq!(response.uid, Some(123));
+        assert_eq!(response.app_rtm_user_id.as_deref(), Some("app_123"));
+        assert_eq!(response.dev_rtm_user_id.as_deref(), Some("dev_456"));
+
+        let response = with_result(
+            r#"{"result":{"channel_id":"ch-2","uid":"77","app_rtm_user_id":"app_123"}}"#,
+            |value| LiveFeedResponse::try_from(value).expect("live feed should parse"),
+        );
+        assert_eq!(response.channel_id.as_deref(), Some("ch-2"));
+        assert_eq!(response.uid, Some(77));
+
+        let response = with_result(
+            r#"{"result":{"data":{"channelId":"ch-3","uid":88}}}"#,
+            |value| OpenCameraResponse::try_from(value).expect("open camera should parse"),
+        );
+        assert!(response.accepted);
+        assert_eq!(response.channel_id.as_deref(), Some("ch-3"));
+        assert_eq!(response.uid, Some(88));
+
+        let response = with_result(r#"{"result":true}"#, |value| {
+            OpenCameraResponse::try_from(value).expect("command-shaped open camera should parse")
+        });
+        assert!(response.accepted);
+        assert_eq!(response.channel_id, None);
     }
 }

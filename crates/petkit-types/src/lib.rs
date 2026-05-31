@@ -6,7 +6,9 @@ extern crate alloc;
 mod client;
 mod command;
 mod device;
+mod discovery;
 mod error;
+mod media;
 mod region;
 mod response;
 mod session;
@@ -22,7 +24,12 @@ pub use device::{
     DeviceFamily, DeviceFamilyKind, DeviceType, FeederDeviceType, FountainDeviceType,
     LitterDeviceType, PurifierDeviceType,
 };
+pub use discovery::{flatten_devices, resolve_device, DeviceCatalog, DeviceLookup};
 pub use error::{PetkitError, PetkitErrorCode};
+pub use media::{
+    latest_image_metadata, CloudVideoResponse, MediaEventType, MediaListResponse, MediaMetadata,
+    MediaType,
+};
 pub use region::{
     gateway_label, group_region_servers, RegionServer, RegionServerGroup, RegionServersPayload,
     CHINA_BASE_URL, DEFAULT_COUNTRY, DEFAULT_TIMEZONE, PASSPORT_BASE_URL,
@@ -31,26 +38,31 @@ pub use response::{
     CalibrationResponse, CallPetResponse, CancelManualFeedResponse, CommandResponse,
     ControlDeviceResponse, DeviceDetailResponse, FamilyListResponse, FeederCalibrationResponse,
     FeederCallPetResponse, FeederCancelManualFeedResponse, FeederDeviceDetailResponse,
-    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederPlaySoundResponse,
-    FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse, FeederRestoreDailyFeedResponse,
-    FeederRestoreFeedResponse, FeederSaveFeedResponse, FeederSaveRepeatsResponse,
-    FeederScheduleCompleteResponse, FeederScheduleRemoveResponse, FeederScheduleSaveResponse,
-    FeederSettingsReadResponse, FeederSuspendFeedResponse, FeederUpdateSettingResponse,
-    FoodReplenishedResponse, FountainDeviceDetailResponse, FountainSettingsReadResponse,
-    FountainUpdateSettingResponse, IotDeviceInfoResponse, IotDeviceInfoV1Response,
-    IotDeviceInfoV2Response, LitterControlDeviceResponse, LitterDeviceDetailResponse,
+    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
+    FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
+    FeederRestoreDailyFeedResponse, FeederRestoreFeedResponse, FeederSaveFeedResponse,
+    FeederSaveRepeatsResponse, FeederScheduleCompleteResponse, FeederScheduleRemoveResponse,
+    FeederScheduleSaveResponse, FeederSettingsReadResponse, FeederStartLiveResponse,
+    FeederSuspendFeedResponse, FeederUpdateSettingResponse, FoodReplenishedResponse,
+    FountainDeviceDetailResponse, FountainSettingsReadResponse, FountainUpdateSettingResponse,
+    IotDeviceInfoResponse, IotDeviceInfoV1Response, IotDeviceInfoV2Response,
+    LitterControlDeviceResponse, LitterDeviceDetailResponse, LitterOpenCameraResponse,
     LitterResetN50DeodorizerResponse, LitterScheduleCompleteResponse, LitterScheduleRemoveResponse,
-    LitterScheduleSaveResponse, LitterSettingsReadResponse, LitterUpdateSettingResponse,
-    LoginResponse, ManualFeedResponse, PetUpdateSettingResponse, PlaySoundResponse,
-    PuraMaxControlDeviceResponse, PuraMaxResetDeodorizerResponse, PurifierControlDeviceResponse,
-    PurifierDeviceDetailResponse, PurifierSettingsReadResponse, PurifierUpdateSettingResponse,
-    RefreshSessionResponse, RegionServersResponse, RemoveDailyFeedResponse,
-    RequestLoginCodeResponse, ResetDesiccantResponse, ResetN50DeodorizerResponse,
-    RestoreDailyFeedResponse, RestoreFeedResponse, SaveFeedResponse, SaveRepeatsResponse,
-    ScheduleCompleteResponse, ScheduleRemoveResponse, ScheduleSaveResponse, SuspendFeedResponse,
+    LitterScheduleSaveResponse, LitterSettingsReadResponse, LitterStartLiveResponse,
+    LitterUpdateSettingResponse, LiveFeedResponse, LoginResponse, ManualFeedResponse,
+    OpenCameraResponse, PetUpdateSettingResponse, PlaySoundResponse, PuraMaxControlDeviceResponse,
+    PuraMaxResetDeodorizerResponse, PurifierControlDeviceResponse, PurifierDeviceDetailResponse,
+    PurifierSettingsReadResponse, PurifierUpdateSettingResponse, RefreshSessionResponse,
+    RegionServersResponse, RemoveDailyFeedResponse, RequestLoginCodeResponse,
+    ResetDesiccantResponse, ResetN50DeodorizerResponse, RestoreDailyFeedResponse,
+    RestoreFeedResponse, SaveFeedResponse, SaveRepeatsResponse, ScheduleCompleteResponse,
+    ScheduleRemoveResponse, ScheduleSaveResponse, StartLiveResponse, SuspendFeedResponse,
     UpdateSettingResponse,
 };
-pub use session::{AccountGroup, DeviceSummary, IotConfigSet, IotDeviceInfo, PetSummary, Session};
+pub use session::{
+    AccountGroup, AliyunMqttConnectionSummary, AliyunMqttOptions, AliyunSecureMode, DeviceSummary,
+    IotConfigSet, IotDeviceInfo, PetSummary, Session,
+};
 pub use setting::{
     to_kv_string, CustomSetting, CustomSettingValue, ExtraFormPayload, FeedDailyList,
     FeedIdentifier, FeederSetting, FountainSetting, LitterControl, LitterSetting, PetSetting,

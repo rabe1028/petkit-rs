@@ -9,8 +9,9 @@ mod request;
 mod response;
 
 pub use ble::{
-    build_ble_frame, build_fountain_ble_command, encode_ble_data, BleEncodedCommand, BLE_END_FRAME,
-    BLE_START_FRAME,
+    build_ble_frame, build_fountain_ble_command, build_fountain_ble_frame_command, encode_ble_data,
+    write_fountain_ble_frame, BleEncodedCommand, BleFrameCommand, BleGattWriteError, BleGattWriter,
+    BLE_END_FRAME, BLE_START_FRAME,
 };
 pub use protocol::{
     AuthenticatedProtocol, D3Feeder, D4Feeder, D4hFeeder, D4sFeeder, D4shFeeder,
@@ -37,8 +38,9 @@ mod tests {
 
     use super::{
         build_ble_frame, build_fountain_ble_command, parse_api_response, parse_text_response,
-        AuthenticatedProtocol, BaseUrl, D4sFeeder, DualManualFeedAmount, FeederMiniFeeder,
-        PublicProtocol, ResponseParts, SingleManualFeedAmount,
+        write_fountain_ble_frame, AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder,
+        DualManualFeedAmount, FeederMiniFeeder, PublicProtocol, ResponseParts,
+        SingleManualFeedAmount,
     };
 
     fn context() -> ClientContext {
@@ -131,6 +133,30 @@ mod tests {
             .expect("pause command must exist");
         assert_eq!(encoded.cmd, 220);
         assert!(!encoded.data.is_empty());
+    }
+
+    #[test]
+    fn ble_gatt_writer_receives_raw_frame() {
+        #[derive(Default)]
+        struct Writer {
+            frame: Vec<u8>,
+        }
+
+        impl BleGattWriter for Writer {
+            type Error = core::convert::Infallible;
+
+            fn write_frame(&mut self, frame: &[u8]) -> Result<(), Self::Error> {
+                self.frame = frame.to_vec();
+                Ok(())
+            }
+        }
+
+        let mut writer = Writer::default();
+        let command = write_fountain_ble_frame(&mut writer, petkit_types::FountainAction::Pause, 5)
+            .expect("write should succeed");
+
+        assert_eq!(writer.frame, command.frame);
+        assert_eq!(command.cmd, 220);
     }
 
     #[test]
