@@ -1,6 +1,8 @@
-.PHONY: fmt fmt-check clippy test test-no-std doc quality deny machete typos ci-quality mutants-list mutants-check mutants-focus fuzz-check actions-local-quality actions-local-mutants actions-local-fuzz
+.PHONY: fmt fmt-check clippy test test-no-std doc quality deny machete typos msrv minimal-versions ci-quality ci-msrv ci-minimal-versions mutants-list mutants-check mutants-focus fuzz-check actions-local-quality actions-local-msrv actions-local-minimal-versions actions-local-mutants actions-local-fuzz
 
 ACTRUN := sh scripts/actrun.sh
+MSRV ?= 1.88.0
+NIGHTLY ?= nightly
 
 fmt:
 	cargo fmt --all
@@ -32,7 +34,17 @@ machete:
 typos:
 	typos .
 
+msrv:
+	MSRV=$(MSRV) sh scripts/ci-msrv.sh
+
+minimal-versions:
+	MSRV=$(MSRV) NIGHTLY=$(NIGHTLY) sh scripts/ci-minimal-versions.sh
+
 ci-quality: quality deny machete typos
+
+ci-msrv: msrv
+
+ci-minimal-versions: minimal-versions
 
 mutants-list:
 	cargo mutants --workspace --all-features --list
@@ -50,6 +62,12 @@ fuzz-check:
 
 actions-local-quality:
 	$(ACTRUN) workflow run .github/workflows/quality.yml --job verify --trigger pull_request --local --include-dirty
+
+actions-local-msrv:
+	$(ACTRUN) workflow run .github/workflows/quality.yml --job msrv --trigger pull_request --local --include-dirty
+
+actions-local-minimal-versions:
+	$(ACTRUN) workflow run .github/workflows/quality.yml --job minimal-versions --trigger pull_request --local --include-dirty
 
 actions-local-mutants:
 	$(ACTRUN) workflow run .github/workflows/tooling.yml --job mutants --trigger push --local --include-dirty
