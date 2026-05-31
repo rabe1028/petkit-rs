@@ -4,7 +4,6 @@ trust_actions = false
 local_skip_actions = [
   "actions/checkout",
   "dtolnay/rust-toolchain",
+  "jdx/mise-action",
   "Swatinem/rust-cache",
-  "taiki-e/install-action",
 ]
-

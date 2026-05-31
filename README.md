@@ -129,18 +129,29 @@ This keeps device-specific operations composable while still letting you inject 
 
 ## Quality commands
 
+Install pinned local tools once with [mise](https://mise.jdx.dev/):
+
+```bash
+mise install
+```
+
 ```bash
 make quality
 make doc
 cargo test
 make test-no-std
+make msrv
+make minimal-versions
 make deny
 make machete
 make typos
 make fuzz-check
+make actions-local-quality
+make actions-local-msrv
+make actions-local-minimal-versions
 ```
 
-If your local workflow runs the tools directly, the workspace also checks cleanly with commands such as `cargo test`, `cargo deny`, `cargo machete`, and `typos`.
+If your local workflow runs the tools directly, the workspace also checks cleanly with commands such as `cargo test`, `cargo deny`, `cargo machete`, and `typos`. Tool versions for cargo-installed binaries are pinned in `.mise.toml`. The CI quality workflow checks stable/latest dependencies, the declared MSRV, and direct-minimal dependency resolution.
 
 ## Caveat
 
