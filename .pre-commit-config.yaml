@@ -29,23 +29,44 @@ repos:
         pass_filenames: false
         files: *rust_workspace_files
 
+      - id: shellcheck
+        name: shellcheck scripts/*.sh
+        entry: mise exec -- shellcheck
+        language: system
+        pass_filenames: true
+        files: ^scripts/.*\.sh$
+
+      - id: shfmt
+        name: shfmt --diff scripts/*.sh
+        entry: mise exec -- shfmt --diff -i 2
+        language: system
+        pass_filenames: true
+        files: ^scripts/.*\.sh$
+
+      - id: actionlint
+        name: actionlint
+        entry: mise exec -- actionlint
+        language: system
+        pass_filenames: false
+        files: ^\.github/workflows/.*\.(yml|yaml)$
+
       - id: cargo-deny
         name: cargo deny check bans licenses sources
-        entry: cargo deny check bans licenses sources
+        entry: mise exec -- cargo deny check bans licenses sources
         language: system
         pass_filenames: false
         files: *rust_workspace_files
 
       - id: cargo-machete
         name: cargo machete
-        entry: cargo machete
+        entry: mise exec -- cargo machete
         language: system
         pass_filenames: false
         files: *rust_workspace_files
 
       - id: typos
         name: typos
-        entry: typos
+        entry: mise exec -- typos
         language: system
         pass_filenames: false
         files: ^(.*\.(rs|toml|md|yaml|yml|json)|\.github/workflows/.*)$
