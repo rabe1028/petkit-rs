@@ -37,7 +37,7 @@ nojson.workspace = true
 petkit-protocol.workspace = true
 petkit-types.workspace = true
 reqwest = { version = "0.12.24", default-features = false, optional = true }
-ureq = { version = "2.10", default-features = false, features = ["tls", "gzip"], optional = true }
+ureq = { version = "2.10.0", default-features = false, features = ["tls", "gzip"], optional = true }
 
 [dev-dependencies]
 futures = { version = "0.3.31", default-features = false, features = ["executor"] }
