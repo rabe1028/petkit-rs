@@ -2438,11 +2438,25 @@ mod tests {
         let dnd = fountain
             .execute_with_settings(&mut writer, FountainAction::DoNotDisturb, 9, &settings)
             .expect("dnd frame should write");
+        let lamp_off_settings =
+            FountainBleSettings::new(5, 40, false, 2, 300, 600, false, 1320, 360)
+                .expect("settings should be valid");
+        let lamp_off_frame_count = writer.frames.len();
+        let lamp_off_result = fountain.light_high(&mut writer, 10, &lamp_off_settings);
 
         assert_eq!(pause.cmd, 220);
         assert_eq!(power.cmd, 220);
         assert_eq!(reset.cmd, 222);
         assert_eq!(dnd.cmd, 221);
+        assert!(
+            lamp_off_result.is_err(),
+            "brightness commands should reject lamp-off settings"
+        );
+        assert_eq!(
+            writer.frames.len(),
+            lamp_off_frame_count,
+            "rejected brightness commands must not write a frame"
+        );
         assert_eq!(
             writer.frames,
             vec![
