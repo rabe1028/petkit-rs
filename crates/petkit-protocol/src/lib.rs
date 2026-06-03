@@ -179,6 +179,18 @@ mod tests {
     }
 
     #[test]
+    fn fountain_ble_brightness_rejects_lamp_off_settings() {
+        let settings = FountainBleSettings::new(5, 40, false, 2, 300, 600, false, 1320, 360)
+            .expect("settings should be valid");
+
+        let error = FountainBleClient::new(petkit_types::FountainDeviceType::W5)
+            .command_with_settings(petkit_types::FountainAction::LightHigh, 9, &settings)
+            .expect_err("brightness should require the light to be on");
+
+        assert!(matches!(error, PetkitError::InvalidArgument(_)));
+    }
+
+    #[test]
     fn fountain_ble_settings_can_be_read_from_cloud_device_detail() {
         let response = ResponseParts::new(
             200,

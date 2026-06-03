@@ -359,6 +359,7 @@ pub fn build_fountain_ble_frame_command_with_settings(
         | FountainAction::LightHigh
         | FountainAction::LightOn
         | FountainAction::LightOff => {
+            validate_fountain_settings_action(action, settings)?;
             let data = fountain_settings_payload(action, settings);
             let payload = build_fountain_settings_payload(&data);
             Ok(build_fountain_ble_command_from_payload(&payload, counter))
@@ -464,6 +465,22 @@ fn fountain_settings_payload(action: FountainAction, settings: &FountainBleSetti
     data.extend_from_slice(&settings.no_disturbing_start_time.to_be_bytes());
     data.extend_from_slice(&settings.no_disturbing_end_time.to_be_bytes());
     data
+}
+
+fn validate_fountain_settings_action(
+    action: FountainAction,
+    settings: &FountainBleSettings,
+) -> Result<(), PetkitError> {
+    if matches!(
+        action,
+        FountainAction::LightLow | FountainAction::LightMedium | FountainAction::LightHigh
+    ) && !settings.lamp_ring_switch
+    {
+        return Err(PetkitError::InvalidArgument(format!(
+            "fountain BLE action `{action}` requires the indicator light to be on"
+        )));
+    }
+    Ok(())
 }
 
 fn required_u8(value: RawJsonValue<'_, '_>, key: &'static str) -> Result<u8, PetkitError> {
