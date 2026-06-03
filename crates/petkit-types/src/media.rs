@@ -35,10 +35,10 @@ fn media_payload<'text, 'raw>(
         "cloud_video",
         "record",
     ] {
-        if let Some(member) = value.to_member(name)?.optional() {
-            if matches!(member.kind(), JsonValueKind::Array | JsonValueKind::Object) {
-                return Ok(member);
-            }
+        if let Some(member) = value.to_member(name)?.optional()
+            && matches!(member.kind(), JsonValueKind::Array | JsonValueKind::Object)
+        {
+            return Ok(member);
         }
     }
     Ok(value)
@@ -347,10 +347,10 @@ fn first_array_member<'text, 'raw>(
         return Ok(None);
     }
     for name in names {
-        if let Some(member) = value.to_member(name)?.optional() {
-            if member.kind() == JsonValueKind::Array {
-                return Ok(Some(member));
-            }
+        if let Some(member) = value.to_member(name)?.optional()
+            && member.kind() == JsonValueKind::Array
+        {
+            return Ok(Some(member));
         }
     }
     Ok(None)

@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use petkit_types::{ClientContext, CHINA_BASE_URL, PASSPORT_BASE_URL};
+use petkit_types::{CHINA_BASE_URL, ClientContext, PASSPORT_BASE_URL};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HttpMethod {

@@ -18,6 +18,7 @@ pub struct DeviceCatalog {
 }
 
 impl DeviceSummary {
+    #[must_use]
     pub fn opaque_id(&self) -> String {
         format!("{}:{}", self.device_type.as_str(), self.device_id)
     }
@@ -26,6 +27,7 @@ impl DeviceSummary {
         DeviceId::new(self.device_id)
     }
 
+    #[must_use]
     pub fn matches_lookup(&self, lookup: DeviceLookup<'_>) -> bool {
         match lookup {
             DeviceLookup::NumericId(id) => self.device_id == id,
@@ -60,22 +62,26 @@ impl DeviceSummary {
 }
 
 impl DeviceCatalog {
+    #[must_use]
     pub fn from_groups(groups: &[AccountGroup]) -> Self {
         Self {
             devices: flatten_devices(groups),
         }
     }
 
+    #[must_use]
     pub fn from_devices(devices: impl Into<Vec<DeviceSummary>>) -> Self {
         Self {
             devices: devices.into(),
         }
     }
 
+    #[must_use]
     pub fn devices(&self) -> &[DeviceSummary] {
         &self.devices
     }
 
+    #[must_use]
     pub fn into_devices(self) -> Vec<DeviceSummary> {
         self.devices
     }
@@ -89,6 +95,7 @@ impl DeviceCatalog {
     }
 }
 
+#[must_use]
 pub fn flatten_devices(groups: &[AccountGroup]) -> Vec<DeviceSummary> {
     groups
         .iter()

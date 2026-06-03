@@ -1,6 +1,6 @@
 use alloc::string::ToString;
 
-use petkit_types::{to_kv_string, PetId, PetSetting};
+use petkit_types::{PetId, PetSetting, to_kv_string};
 
 use crate::{HttpMethod, RequestSpec};
 

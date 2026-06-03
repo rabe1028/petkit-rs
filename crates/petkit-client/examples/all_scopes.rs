@@ -6,7 +6,8 @@ use std::error::Error;
 
 use petkit_protocol::{
     AuthenticatedProtocol, BaseUrl, D3Feeder, D4sFeeder, D4shFeeder, DualManualFeedAmount,
-    FreshElementFeeder, PublicProtocol, RequestSpec, T6Litter,
+    FountainBleClient, FountainBleSettings, FreshElementFeeder, PublicProtocol, RequestSpec,
+    T6Litter,
 };
 use petkit_types::{
     CalibrationAction, ClientContext, ClientProfile, CustomSetting, CustomSettingValue,
@@ -44,6 +45,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         "pumpMode",
         CustomSettingValue::String(SettingString::new("smart")?),
     )?);
+    let fountain_ble = FountainBleClient::new(FountainDeviceType::W5);
+    let fountain_ble_settings =
+        FountainBleSettings::new(5, 40, true, 2, 300, 600, false, 1320, 360)?;
+    let fountain_ble_commands = [
+        fountain_ble.command(petkit_types::FountainAction::PowerOn, 1)?,
+        fountain_ble.command(petkit_types::FountainAction::Pause, 2)?,
+        fountain_ble.command_with_settings(
+            petkit_types::FountainAction::LightHigh,
+            3,
+            &fountain_ble_settings,
+        )?,
+    ];
     let feeder_other = FeederSetting::Other(CustomSetting::new(
         "settings.customMode",
         CustomSettingValue::Int(SettingInt::new(1)?),
@@ -108,6 +121,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for spec in &specs {
         println!("{}", spec.url());
+    }
+    for command in &fountain_ble_commands {
+        println!(
+            "fountain BLE cmd={} bytes={}",
+            command.cmd,
+            command.frame.len()
+        );
     }
 
     let dispatch_device_types = vec![

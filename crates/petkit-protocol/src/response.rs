@@ -22,22 +22,20 @@ where
     let raw = RawJson::parse(body).map_err(|error| PetkitError::Decode(error.to_string()))?;
     let envelope = raw.value();
 
-    if let Some(error_member) = envelope.to_member("error")?.optional() {
-        if error_member.kind() != JsonValueKind::Null {
-            let code = error_member
-                .to_member("code")
-                .and_then(nojson::RawJsonMember::required)
-                .and_then(i32::try_from)
-                .map_err(|_| {
-                    PetkitError::InvalidResponse("malformed error envelope: bad `code`")
-                })?;
-            let msg = error_member
-                .to_member("msg")
-                .and_then(nojson::RawJsonMember::required)
-                .and_then(String::try_from)
-                .map_err(|_| PetkitError::InvalidResponse("malformed error envelope: bad `msg`"))?;
-            return Err(PetkitError::api(code, msg));
-        }
+    if let Some(error_member) = envelope.to_member("error")?.optional()
+        && error_member.kind() != JsonValueKind::Null
+    {
+        let code = error_member
+            .to_member("code")
+            .and_then(nojson::RawJsonMember::required)
+            .and_then(i32::try_from)
+            .map_err(|_| PetkitError::InvalidResponse("malformed error envelope: bad `code`"))?;
+        let msg = error_member
+            .to_member("msg")
+            .and_then(nojson::RawJsonMember::required)
+            .and_then(String::try_from)
+            .map_err(|_| PetkitError::InvalidResponse("malformed error envelope: bad `msg`"))?;
+        return Err(PetkitError::api(code, msg));
     }
 
     let result = envelope

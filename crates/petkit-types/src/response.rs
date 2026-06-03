@@ -412,10 +412,10 @@ fn live_feed_payload<'text, 'raw>(
         return Ok(value);
     }
     for name in ["data", "live", "liveFeed", "live_feed"] {
-        if let Some(member) = value.to_member(name)?.optional() {
-            if member.kind() == JsonValueKind::Object {
-                return Ok(member);
-            }
+        if let Some(member) = value.to_member(name)?.optional()
+            && member.kind() == JsonValueKind::Object
+        {
+            return Ok(member);
         }
     }
     Ok(value)
@@ -511,6 +511,7 @@ mod tests {
     use alloc::string::String;
 
     use nojson::RawJson;
+    use secrecy::ExposeSecret;
 
     use super::*;
 
@@ -537,7 +538,7 @@ mod tests {
             |value| LoginResponse::try_from(value).expect("login response should parse"),
         );
 
-        assert_eq!(response.session.id, "s1");
+        assert_eq!(response.session.id.expose_secret(), "s1");
         assert_eq!(Session::from(response).user_id, "u1");
     }
 

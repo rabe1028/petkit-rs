@@ -44,6 +44,7 @@ pub enum DeviceType {
 }
 
 impl DeviceType {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Self::Cozy => "cozy",
@@ -70,6 +71,7 @@ impl DeviceType {
         }
     }
 
+    #[must_use]
     pub const fn family(&self) -> DeviceFamily {
         match self {
             Self::Cozy => DeviceFamily::Cozy,
@@ -88,6 +90,7 @@ impl DeviceType {
         }
     }
 
+    #[must_use]
     pub const fn supports_camera(&self) -> bool {
         matches!(
             self,
@@ -96,6 +99,7 @@ impl DeviceType {
     }
 
     /// Convert to the strongly-typed per-family enum.
+    #[must_use]
     pub fn into_family(self) -> DeviceFamilyKind {
         match self {
             Self::Cozy => DeviceFamilyKind::Cozy,
@@ -195,6 +199,7 @@ pub enum FeederDeviceType {
 }
 
 impl FeederDeviceType {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Feeder => "feeder",
@@ -207,30 +212,37 @@ impl FeederDeviceType {
         }
     }
 
+    #[must_use]
     pub const fn is_dual_hopper(self) -> bool {
         matches!(self, Self::D4s | Self::D4sh)
     }
 
+    #[must_use]
     pub const fn supports_camera(self) -> bool {
         matches!(self, Self::D4h | Self::D4sh)
     }
 
+    #[must_use]
     pub const fn uses_legacy_manual_feed_endpoint(self) -> bool {
         matches!(self, Self::Feeder | Self::FeederMini)
     }
 
+    #[must_use]
     pub const fn uses_legacy_desiccant_endpoint(self) -> bool {
         matches!(self, Self::Feeder | Self::FeederMini)
     }
 
+    #[must_use]
     pub const fn uses_legacy_update_setting_endpoint(self) -> bool {
         matches!(self, Self::FeederMini)
     }
 
+    #[must_use]
     pub const fn uses_legacy_schedule_endpoint(self) -> bool {
         matches!(self, Self::Feeder | Self::FeederMini)
     }
 
+    #[must_use]
     pub const fn uses_legacy_suspend_feed_endpoint(self) -> bool {
         matches!(self, Self::Feeder | Self::FeederMini)
     }
@@ -280,6 +292,7 @@ pub enum LitterDeviceType {
 }
 
 impl LitterDeviceType {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::T3 => "t3",
@@ -290,16 +303,19 @@ impl LitterDeviceType {
         }
     }
 
+    #[must_use]
     pub const fn supports_camera(self) -> bool {
         matches!(self, Self::T5 | Self::T6 | Self::T7)
     }
 
     /// True for litter boxes that ship with an N50 deodorizer module.
+    #[must_use]
     pub const fn supports_n50_deodorizer(self) -> bool {
         matches!(self, Self::T4 | Self::T5 | Self::T6)
     }
 
     /// True for litter boxes that ship with an N60 deodorant spray system.
+    #[must_use]
     pub const fn supports_n60_deodorizer(self) -> bool {
         matches!(self, Self::T5 | Self::T6 | Self::T7)
     }
@@ -344,6 +360,7 @@ pub enum FountainDeviceType {
 }
 
 impl FountainDeviceType {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::W4 => "w4",
@@ -389,6 +406,7 @@ pub enum PurifierDeviceType {
 }
 
 impl PurifierDeviceType {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::K2 => "k2",
@@ -396,10 +414,12 @@ impl PurifierDeviceType {
         }
     }
 
+    #[must_use]
     pub const fn uses_legacy_update_setting_endpoint(self) -> bool {
         matches!(self, Self::K3)
     }
 
+    #[must_use]
     pub const fn uses_device_data_endpoint(self) -> bool {
         matches!(self, Self::K3)
     }

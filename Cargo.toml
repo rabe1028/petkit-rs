@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/rabe1028/petkit-rs"
 rust-version = "1.88"
@@ -23,7 +23,9 @@ nojson = { version = "0.3.12", default-features = false }
 percent-encoding = { version = "2.3.2", default-features = false }
 petkit-protocol = { version = "0.1.0", path = "crates/petkit-protocol" }
 petkit-types = { version = "0.1.0", path = "crates/petkit-types", default-features = false }
+secrecy = { version = "0.10.3", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
+thiserror = { version = "2.0.12", default-features = false }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

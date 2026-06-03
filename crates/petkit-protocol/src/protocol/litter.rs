@@ -3,7 +3,7 @@ use alloc::string::ToString;
 use core::marker::PhantomData;
 
 use petkit_types::{
-    to_kv_string, DeviceId, LitterControl, LitterDeviceType, LitterSetting, ScheduleLimit,
+    DeviceId, LitterControl, LitterDeviceType, LitterSetting, ScheduleLimit, to_kv_string,
 };
 
 use crate::{HttpMethod, RequestSpec};
