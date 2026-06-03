@@ -3,8 +3,10 @@ use alloc::string::{String, ToString};
 use core::fmt;
 
 use nojson::JsonParseError;
+use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PetkitErrorCode {
     ServerBusy,
     SessionExpired,
@@ -14,6 +16,7 @@ pub enum PetkitErrorCode {
 }
 
 impl PetkitErrorCode {
+    #[must_use]
     pub const fn from_raw(raw: i32) -> Self {
         match raw {
             1 => Self::ServerBusy,
@@ -24,6 +27,7 @@ impl PetkitErrorCode {
         }
     }
 
+    #[must_use]
     pub const fn raw(self) -> i32 {
         match self {
             Self::ServerBusy => 1,
@@ -47,18 +51,23 @@ impl fmt::Display for PetkitErrorCode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum PetkitError {
+    #[error("{code}: {message}")]
     Api {
         code: PetkitErrorCode,
         message: String,
     },
-    HttpStatus {
-        status: u16,
-    },
+    #[error("unexpected HTTP status {status}")]
+    HttpStatus { status: u16 },
+    #[error("decode error: {0}")]
     Decode(String),
+    #[error("{0}")]
     InvalidResponse(&'static str),
+    #[error("invalid argument: {0}")]
     InvalidArgument(String),
+    #[error("unsupported command `{command}` for device `{device_type}`")]
     UnsupportedCommand {
         device_type: String,
         command: &'static str,
@@ -66,6 +75,7 @@ pub enum PetkitError {
 }
 
 impl PetkitError {
+    #[must_use]
     pub fn api(code: i32, message: impl Into<String>) -> Self {
         Self::Api {
             code: PetkitErrorCode::from_raw(code),
@@ -73,28 +83,6 @@ impl PetkitError {
         }
     }
 }
-
-impl fmt::Display for PetkitError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Api { code, message } => write!(f, "{code}: {message}"),
-            Self::HttpStatus { status } => write!(f, "unexpected HTTP status {status}"),
-            Self::Decode(message) => write!(f, "decode error: {message}"),
-            Self::InvalidResponse(message) => f.write_str(message),
-            Self::InvalidArgument(message) => write!(f, "invalid argument: {message}"),
-            Self::UnsupportedCommand {
-                device_type,
-                command,
-            } => write!(
-                f,
-                "unsupported command `{command}` for device `{device_type}`"
-            ),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for PetkitError {}
 
 impl From<JsonParseError> for PetkitError {
     fn from(value: JsonParseError) -> Self {

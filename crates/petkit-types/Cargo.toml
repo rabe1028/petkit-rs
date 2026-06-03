@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Shared no_std-friendly types for the petkit-rs workspace"
+include = ["Cargo.toml", "src/**/*"]
 
 [features]
 default = ["std"]
@@ -18,4 +19,6 @@ workspace = true
 hex.workspace = true
 hmac.workspace = true
 nojson.workspace = true
+secrecy.workspace = true
 sha2.workspace = true
+thiserror.workspace = true

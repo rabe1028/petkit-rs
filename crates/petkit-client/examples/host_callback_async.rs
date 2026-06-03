@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 use std::rc::Rc;
 
-use petkit_client::host_callback::HostCallbackTransport;
 use petkit_client::AsyncPetkitClient;
+use petkit_client::host_callback::HostCallbackTransport;
 use petkit_protocol::{BaseUrl, RequestSpec, ResponseParts};
 use petkit_types::{ClientContext, ClientProfile};
 

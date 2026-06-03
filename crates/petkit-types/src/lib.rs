@@ -24,15 +24,15 @@ pub use device::{
     DeviceFamily, DeviceFamilyKind, DeviceType, FeederDeviceType, FountainDeviceType,
     LitterDeviceType, PurifierDeviceType,
 };
-pub use discovery::{flatten_devices, resolve_device, DeviceCatalog, DeviceLookup};
+pub use discovery::{DeviceCatalog, DeviceLookup, flatten_devices, resolve_device};
 pub use error::{PetkitError, PetkitErrorCode};
 pub use media::{
-    latest_image_metadata, latest_video_metadata, CloudVideoResponse, GetDownloadM3u8Response,
-    GetM3u8Response, M3u8Response, MediaEventType, MediaListResponse, MediaMetadata, MediaType,
+    CloudVideoResponse, GetDownloadM3u8Response, GetM3u8Response, M3u8Response, MediaEventType,
+    MediaListResponse, MediaMetadata, MediaType, latest_image_metadata, latest_video_metadata,
 };
 pub use region::{
-    gateway_label, group_region_servers, RegionServer, RegionServerGroup, RegionServersPayload,
-    CHINA_BASE_URL, DEFAULT_COUNTRY, DEFAULT_TIMEZONE, PASSPORT_BASE_URL,
+    CHINA_BASE_URL, DEFAULT_COUNTRY, DEFAULT_TIMEZONE, PASSPORT_BASE_URL, RegionServer,
+    RegionServerGroup, RegionServersPayload, gateway_label, group_region_servers,
 };
 pub use response::{
     CalibrationResponse, CallPetResponse, CancelManualFeedResponse, CommandResponse,
@@ -64,9 +64,9 @@ pub use session::{
     IotConfigSet, IotDeviceInfo, PetSummary, Session,
 };
 pub use setting::{
-    to_kv_string, CustomSetting, CustomSettingValue, ExtraFormPayload, FeedDailyList,
-    FeedIdentifier, FeederSetting, FountainSetting, LitterControl, LitterSetting, PetSetting,
-    PurifierControl, PurifierSetting, RepeatSchedule,
+    CustomSetting, CustomSettingValue, ExtraFormPayload, FeedDailyList, FeedIdentifier,
+    FeederSetting, FountainSetting, LitterControl, LitterSetting, PetSetting, PurifierControl,
+    PurifierSetting, RepeatSchedule, to_kv_string,
 };
 pub use value::{
     CalibrationAction, ControlCommandType, DeviceId, FeedEntryId, FeedTime, FeederSurplusGrams,
@@ -80,8 +80,8 @@ mod tests {
     use alloc::string::String;
 
     use crate::{
-        gateway_label, group_region_servers, DeviceFamily, DeviceType, RegionServer,
-        RegionServersPayload,
+        DeviceFamily, DeviceType, RegionServer, RegionServersPayload, gateway_label,
+        group_region_servers,
     };
 
     #[test]
@@ -97,9 +97,11 @@ mod tests {
 
         let groups = group_region_servers(&payload);
         assert_eq!(groups.len(), 2);
-        assert!(groups
-            .iter()
-            .any(|group| group.gateway == crate::CHINA_BASE_URL));
+        assert!(
+            groups
+                .iter()
+                .any(|group| group.gateway == crate::CHINA_BASE_URL)
+        );
         assert_eq!(gateway_label("https://api.eu-pet.com/latest/"), "Europe");
     }
 

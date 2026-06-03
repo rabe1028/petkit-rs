@@ -37,6 +37,7 @@ impl Default for ClientProfile {
 }
 
 impl ClientProfile {
+    #[must_use]
     pub fn x_client_value(&self) -> String {
         format!("{}({};{})", self.platform, self.os_version, self.model_name)
     }
@@ -50,6 +51,7 @@ pub struct ClientContext {
 }
 
 impl ClientContext {
+    #[must_use]
     pub fn new(
         profile: ClientProfile,
         timezone_id: impl Into<String>,
@@ -62,6 +64,7 @@ impl ClientContext {
         }
     }
 
+    #[must_use]
     pub fn render_client_descriptor(&self) -> String {
         format!(
             "{{'locale': '{}', 'name': '{}', 'osVersion': '{}', 'phoneBrand': '{}', 'platform': '{}', 'source': '{}', 'version': '{}', 'timezoneId': '{}', 'timezone': '{}'}}",

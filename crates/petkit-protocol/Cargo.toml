@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Sans-io protocol builders and parsers for petkit-rs"
+include = ["Cargo.toml", "src/**/*"]
 
 [features]
 default = ["std"]
@@ -19,3 +20,4 @@ base64.workspace = true
 nojson.workspace = true
 percent-encoding.workspace = true
 petkit-types.workspace = true
+thiserror.workspace = true

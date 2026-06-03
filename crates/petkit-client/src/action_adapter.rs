@@ -46,19 +46,18 @@ pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction,
         }
         "cancel_feed" | "cancel_manual_feed" => Ok(ParsedAction::FeederCancelManualFeed),
         "call_pet" => Ok(ParsedAction::FeederCallPet),
-        "play_sound" => Ok(ParsedAction::FeederPlaySound(SoundId::new(
-            parse_u64_any(args, &["sound", "sound_id"])?,
-        )?)),
+        "play_sound" => Ok(ParsedAction::FeederPlaySound(SoundId::new(parse_u64_any(
+            args,
+            &["sound", "sound_id"],
+        )?)?)),
         "food_replenished" => Ok(ParsedAction::FeederFoodReplenished),
         "reset_desiccant" => Ok(ParsedAction::FeederResetDesiccant),
-        "surplus_level" | "surplus_grams" | "surplus" => {
-            Ok(ParsedAction::FeederUpdateSetting(FeederSetting::Surplus(
-                FeederSurplusGrams::new(parse_u16_any(
-                    args,
-                    &["value", "grams", "level", "surplus", "surplus_grams"],
-                )?)?,
-            )))
-        }
+        "surplus_level" | "surplus_grams" | "surplus" => Ok(ParsedAction::FeederUpdateSetting(
+            FeederSetting::Surplus(FeederSurplusGrams::new(parse_u16_any(
+                args,
+                &["value", "grams", "level", "surplus", "surplus_grams"],
+            )?)?),
+        )),
         "update_setting" => Ok(ParsedAction::UpdateSetting(parse_custom_setting(args)?)),
         "camera_ptz" => Err(PetkitError::InvalidArgument(String::from(
             "`camera_ptz` is an Agora/RTM action and is intentionally outside the HTTP action adapter",
@@ -124,7 +123,7 @@ fn parse_custom_setting_value(args: &[(&str, &str)]) -> Result<CustomSettingValu
     let value_type = arg_any(args, &["type", "value_type"]).map(normalize_action);
     match value_type.as_deref() {
         Some("bool" | "boolean") => {
-            return Ok(CustomSettingValue::BoolAsInt(parse_bool_value(raw)?))
+            return Ok(CustomSettingValue::BoolAsInt(parse_bool_value(raw)?));
         }
         Some("int" | "integer" | "number") => {
             return Ok(CustomSettingValue::Int(SettingInt::new(parse_i64_value(
@@ -495,11 +494,13 @@ mod tests {
                     .expect("custom setting should be valid")
             )
         );
-        assert!(parse_action(
-            "update_setting",
-            &[("key", "settings.raw"), ("value_json", "{\"mode\":2}")]
-        )
-        .is_ok());
+        assert!(
+            parse_action(
+                "update_setting",
+                &[("key", "settings.raw"), ("value_json", "{\"mode\":2}")]
+            )
+            .is_ok()
+        );
     }
 
     #[test]

@@ -4,13 +4,26 @@ use alloc::vec::Vec;
 
 use hmac::{Hmac, Mac};
 use nojson::{JsonParseError, RawJsonValue};
+use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::{DeviceType, PetkitError};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+fn secret_eq(a: &SecretString, b: &SecretString) -> bool {
+    a.expose_secret() == b.expose_secret()
+}
+
+fn secret_opt_eq(a: &Option<SecretString>, b: &Option<SecretString>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => secret_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Session {
-    pub id: String,
+    pub id: SecretString,
     pub user_id: String,
     pub expires_in: u64,
     pub region: Option<String>,
@@ -18,12 +31,25 @@ pub struct Session {
     pub refreshed_at: Option<String>,
 }
 
+impl PartialEq for Session {
+    fn eq(&self, other: &Self) -> bool {
+        secret_eq(&self.id, &other.id)
+            && self.user_id == other.user_id
+            && self.expires_in == other.expires_in
+            && self.region == other.region
+            && self.created_at == other.created_at
+            && self.refreshed_at == other.refreshed_at
+    }
+}
+
+impl Eq for Session {}
+
 impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for Session {
     type Error = JsonParseError;
 
     fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: value.to_member("id")?.required()?.try_into()?,
+            id: SecretString::from(String::try_from(value.to_member("id")?.required()?)?),
             user_id: value.to_member("userId")?.required()?.try_into()?,
             expires_in: value.to_member("expiresIn")?.required()?.try_into()?,
             region: optional_member(value.to_member("region")?)?,
@@ -33,11 +59,11 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for Session {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct IotDeviceInfo {
     pub created_at: Option<String>,
     pub device_name: Option<String>,
-    pub device_secret: Option<String>,
+    pub device_secret: Option<SecretString>,
     pub id: Option<u64>,
     pub iot_instance_id: Option<String>,
     pub iot_platform: Option<String>,
@@ -50,6 +76,26 @@ pub struct IotDeviceInfo {
     pub device_type_id: Option<u64>,
 }
 
+impl PartialEq for IotDeviceInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.created_at == other.created_at
+            && self.device_name == other.device_name
+            && secret_opt_eq(&self.device_secret, &other.device_secret)
+            && self.id == other.id
+            && self.iot_instance_id == other.iot_instance_id
+            && self.iot_platform == other.iot_platform
+            && self.mqtt_host == other.mqtt_host
+            && self.mqtt_ip == other.mqtt_ip
+            && self.product_key == other.product_key
+            && self.region_id == other.region_id
+            && self.standby_mqtt_host == other.standby_mqtt_host
+            && self.standby_mqtt_ip == other.standby_mqtt_ip
+            && self.device_type_id == other.device_type_id
+    }
+}
+
+impl Eq for IotDeviceInfo {}
+
 impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for IotDeviceInfo {
     type Error = JsonParseError;
 
@@ -57,7 +103,8 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for IotDeviceInfo {
         Ok(Self {
             created_at: optional_member(value.to_member("createdAt")?)?,
             device_name: optional_member(value.to_member("deviceName")?)?,
-            device_secret: optional_member(value.to_member("deviceSecret")?)?,
+            device_secret: optional_member::<String>(value.to_member("deviceSecret")?)?
+                .map(SecretString::from),
             id: optional_member(value.to_member("id")?)?,
             iot_instance_id: optional_member(value.to_member("iotInstanceId")?)?,
             iot_platform: optional_member(value.to_member("iotPlatform")?)?,
@@ -96,6 +143,7 @@ pub enum AliyunSecureMode {
 }
 
 impl AliyunSecureMode {
+    #[must_use]
     pub const fn secure_mode_value(self) -> &'static str {
         match self {
             Self::Plain => "3",
@@ -103,6 +151,7 @@ impl AliyunSecureMode {
         }
     }
 
+    #[must_use]
     pub const fn default_port(self) -> u16 {
         match self {
             Self::Plain => 1883,
@@ -118,6 +167,7 @@ pub struct AliyunMqttOptions {
 }
 
 impl AliyunMqttOptions {
+    #[must_use]
     pub const fn new(secure_mode: AliyunSecureMode) -> Self {
         Self {
             secure_mode,
@@ -125,6 +175,7 @@ impl AliyunMqttOptions {
         }
     }
 
+    #[must_use]
     pub fn with_client_id(mut self, client_id: impl Into<String>) -> Self {
         self.client_id = Some(client_id.into());
         self
@@ -137,7 +188,7 @@ impl Default for AliyunMqttOptions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct AliyunMqttConnectionSummary {
     pub broker_id: String,
     pub host: String,
@@ -146,12 +197,30 @@ pub struct AliyunMqttConnectionSummary {
     pub device_name: String,
     pub client_id: String,
     pub username: String,
-    pub password: String,
+    pub password: SecretString,
     pub subscribe_topic: String,
     pub publish_topic: String,
 }
 
+impl PartialEq for AliyunMqttConnectionSummary {
+    fn eq(&self, other: &Self) -> bool {
+        self.broker_id == other.broker_id
+            && self.host == other.host
+            && self.port == other.port
+            && self.product_key == other.product_key
+            && self.device_name == other.device_name
+            && self.client_id == other.client_id
+            && self.username == other.username
+            && secret_eq(&self.password, &other.password)
+            && self.subscribe_topic == other.subscribe_topic
+            && self.publish_topic == other.publish_topic
+    }
+}
+
+impl Eq for AliyunMqttConnectionSummary {}
+
 impl IotConfigSet {
+    #[must_use]
     pub fn preferred_aliyun_device(&self) -> Option<&IotDeviceInfo> {
         self.petkit.as_ref().or(self.ali.as_ref())
     }
@@ -177,7 +246,10 @@ impl IotDeviceInfo {
     ) -> Result<AliyunMqttConnectionSummary, PetkitError> {
         let product_key = required_iot_field(self.product_key.as_deref(), "productKey")?;
         let device_name = required_iot_field(self.device_name.as_deref(), "deviceName")?;
-        let device_secret = required_iot_field(self.device_secret.as_deref(), "deviceSecret")?;
+        let device_secret = required_iot_field(
+            self.device_secret.as_ref().map(ExposeSecret::expose_secret),
+            "deviceSecret",
+        )?;
         let (host, port) = self.mqtt_endpoint(options.secure_mode)?;
         let raw_client_id = options.client_id.as_deref().unwrap_or(device_name);
         let content =
@@ -199,7 +271,7 @@ impl IotDeviceInfo {
                 options.secure_mode.secure_mode_value()
             ),
             username: format!("{device_name}&{product_key}"),
-            password,
+            password: SecretString::from(password),
             subscribe_topic: format!("{base}/get"),
             publish_topic: format!("{base}/update"),
         })
@@ -379,7 +451,7 @@ mod iot_tests {
                 mqtt_host: Some(String::from("ssl://mqtt.example:1883")),
                 product_key: Some(String::from("pk123")),
                 device_name: Some(String::from("dn456")),
-                device_secret: Some(String::from("secret789")),
+                device_secret: Some(SecretString::from(String::from("secret789"))),
                 ..IotDeviceInfo::default()
             }),
             ali: None,
@@ -399,7 +471,7 @@ mod iot_tests {
         assert_eq!(summary.subscribe_topic, "/pk123/dn456/user/get");
         assert_eq!(summary.publish_topic, "/pk123/dn456/user/update");
         assert_eq!(
-            summary.password,
+            summary.password.expose_secret(),
             "9e298bf7d08381ce089fc02b62ebc5fb740bb4622c10678639d84a8c71564ec0"
         );
     }
@@ -409,7 +481,7 @@ mod iot_tests {
         let info = IotDeviceInfo {
             product_key: Some(String::from("pk123")),
             device_name: Some(String::from("dn456")),
-            device_secret: Some(String::from("secret789")),
+            device_secret: Some(SecretString::from(String::from("secret789"))),
             region_id: Some(String::from("cn-shanghai")),
             ..IotDeviceInfo::default()
         };

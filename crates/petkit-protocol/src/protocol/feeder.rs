@@ -1,7 +1,7 @@
 use alloc::format;
 use alloc::string::String;
 
-use petkit_types::{to_kv_string, FeederDeviceType, FeederSetting};
+use petkit_types::{FeederDeviceType, FeederSetting, to_kv_string};
 
 mod amount;
 mod model;

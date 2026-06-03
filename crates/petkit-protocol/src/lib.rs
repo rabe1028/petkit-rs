@@ -9,9 +9,11 @@ mod request;
 mod response;
 
 pub use ble::{
-    build_ble_frame, build_fountain_ble_command, build_fountain_ble_frame_command, encode_ble_data,
-    write_fountain_ble_frame, BleEncodedCommand, BleFrameCommand, BleGattWriteError, BleGattWriter,
-    BLE_END_FRAME, BLE_START_FRAME,
+    BLE_END_FRAME, BLE_START_FRAME, BleEncodedCommand, BleFrameCommand, BleGattWriteError,
+    BleGattWriter, FountainBleClient, FountainBleSettings, build_ble_frame,
+    build_fountain_ble_command, build_fountain_ble_frame_command,
+    build_fountain_ble_frame_command_with_settings, encode_ble_data, write_fountain_ble_frame,
+    write_fountain_ble_frame_with_settings,
 };
 pub use protocol::{
     AuthenticatedProtocol, D3Feeder, D4Feeder, D4hFeeder, D4sFeeder, D4shFeeder,
@@ -24,7 +26,7 @@ pub use protocol::{
     T7Litter,
 };
 pub use request::{
-    session_headers, BaseUrl, FormField, Header, HttpMethod, QueryField, RequestSpec, ResponseParts,
+    BaseUrl, FormField, Header, HttpMethod, QueryField, RequestSpec, ResponseParts, session_headers,
 };
 pub use response::{parse_api_response, parse_text_response};
 
@@ -32,15 +34,15 @@ pub use response::{parse_api_response, parse_text_response};
 #[allow(clippy::expect_used)]
 mod tests {
     use petkit_types::{
-        ClientContext, ClientProfile, DeviceId, FeederDeviceType, PetkitDay, PetkitError,
-        PetkitErrorCode, PurifierDeviceType,
+        ClientContext, ClientProfile, DeviceDetailResponse, DeviceId, FeederDeviceType, PetkitDay,
+        PetkitError, PetkitErrorCode, PurifierDeviceType,
     };
 
     use super::{
-        build_ble_frame, build_fountain_ble_command, parse_api_response, parse_text_response,
-        write_fountain_ble_frame, AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder,
-        DualManualFeedAmount, FeederMiniFeeder, PublicProtocol, ResponseParts,
-        SingleManualFeedAmount,
+        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, DualManualFeedAmount,
+        FeederMiniFeeder, FountainBleClient, FountainBleSettings, PublicProtocol, ResponseParts,
+        SingleManualFeedAmount, build_ble_frame, build_fountain_ble_command, parse_api_response,
+        parse_text_response, write_fountain_ble_frame,
     };
 
     fn context() -> ClientContext {
@@ -157,6 +159,50 @@ mod tests {
 
         assert_eq!(writer.frame, command.frame);
         assert_eq!(command.cmd, 220);
+    }
+
+    #[test]
+    fn fountain_ble_client_builds_setting_backed_actions() {
+        let settings = FountainBleSettings::new(5, 40, true, 2, 300, 600, false, 1320, 360)
+            .expect("settings should be valid");
+        let command = FountainBleClient::new(petkit_types::FountainDeviceType::W5)
+            .command_with_settings(petkit_types::FountainAction::LightHigh, 9, &settings)
+            .expect("light command should include settings");
+
+        assert_eq!(command.cmd, 221);
+        assert_eq!(
+            command.frame,
+            vec![
+                250, 252, 253, 221, 1, 9, 13, 0, 5, 40, 1, 3, 1, 44, 2, 88, 0, 5, 40, 1, 104, 251
+            ]
+        );
+    }
+
+    #[test]
+    fn fountain_ble_settings_can_be_read_from_cloud_device_detail() {
+        let response = ResponseParts::new(
+            200,
+            vec![],
+            br#"{"result":{"settings":{"smartWorkingTime":"5","smartSleepTime":40,"lampRingSwitch":1,"lampRingBrightness":2,"lampRingLightUpTime":300,"lampRingGoOutTime":600,"noDisturbingSwitch":false,"noDisturbingStartTime":1320,"noDisturbingEndTime":360}}}"#.to_vec(),
+        );
+        let detail: DeviceDetailResponse =
+            parse_api_response(&response).expect("device detail should parse");
+
+        let settings = FountainBleSettings::from_device_detail(&detail)
+            .expect("fountain BLE settings should parse");
+
+        assert_eq!(
+            settings,
+            FountainBleSettings::new(5, 40, true, 2, 300, 600, false, 1320, 360)
+                .expect("settings should be valid")
+        );
+    }
+
+    #[test]
+    fn fountain_ble_settings_reject_out_of_range_values() {
+        assert!(FountainBleSettings::new(5, 40, true, 4, 300, 600, false, 1320, 360).is_err());
+        assert!(FountainBleSettings::new(5, 40, true, 2, 1440, 600, false, 1320, 360).is_err());
+        assert!(FountainBleSettings::new(5, 40, true, 2, 300, 600, false, 1440, 360).is_err());
     }
 
     #[test]

@@ -60,6 +60,7 @@ pub struct RegionServerGroup {
     pub representative_country: String,
 }
 
+#[must_use]
 pub fn gateway_label(gateway: &str) -> &str {
     match gateway {
         "https://api.eu-pet.com/latest/" => "Europe",
@@ -71,6 +72,7 @@ pub fn gateway_label(gateway: &str) -> &str {
     }
 }
 
+#[must_use]
 pub fn group_region_servers(payload: &RegionServersPayload) -> Vec<RegionServerGroup> {
     let mut countries_by_gateway: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for entry in &payload.list {

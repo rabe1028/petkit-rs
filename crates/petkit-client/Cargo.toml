@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "std transport adapters and high-level clients for petkit-rs"
+include = ["Cargo.toml", "src/**/*", "examples/**/*"]
 
 [features]
 default = ["async", "blocking"]
@@ -37,6 +38,8 @@ nojson.workspace = true
 petkit-protocol.workspace = true
 petkit-types.workspace = true
 reqwest = { version = "0.12.24", default-features = false, optional = true }
+secrecy.workspace = true
+thiserror.workspace = true
 ureq = { version = "2.10.0", default-features = false, features = ["tls", "gzip"], optional = true }
 
 [dev-dependencies]
@@ -50,3 +53,6 @@ required-features = ["async"]
 [[example]]
 name = "host_callback_blocking"
 required-features = ["blocking"]
+
+[[example]]
+name = "fountain_ble_writer"

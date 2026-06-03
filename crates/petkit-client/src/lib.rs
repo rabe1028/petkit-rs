@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use core::fmt;
 #[cfg(any(feature = "async", feature = "blocking"))]
 use core::marker::PhantomData;
 
@@ -9,18 +8,18 @@ use md5::{Digest, Md5};
 use nojson::{JsonParseError, RawJsonValue};
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_protocol::{
-    parse_api_response, AuthenticatedProtocol, BaseUrl, DynamicFeeder, DynamicLitter, FeederModel,
-    FeederScope, FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
+    AuthenticatedProtocol, BaseUrl, DynamicFeeder, DynamicLitter, FeederModel, FeederScope,
+    FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
     FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope, LitterModel, LitterScope,
     LitterSupportsCamera, LitterSupportsN50Deodorizer, ManualFeedAmount, PetScope, PublicProtocol,
-    PurifierScope, RequestSpec, ResponseParts,
+    PurifierScope, RequestSpec, ResponseParts, parse_api_response,
 };
 use petkit_types::PetkitError;
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_types::{
-    flatten_devices, AccountGroup, CalibrationAction, ClientContext, CloudVideoResponse,
-    DeviceCatalog, DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList,
-    FeedEntryId, FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
+    AccountGroup, CalibrationAction, ClientContext, CloudVideoResponse, DeviceCatalog,
+    DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList, FeedEntryId,
+    FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
     FeederCancelManualFeedResponse, FeederDeviceDetailResponse, FeederDeviceType,
     FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
     FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
@@ -37,16 +36,22 @@ use petkit_types::{
     PurifierControl, PurifierControlDeviceResponse, PurifierDeviceDetailResponse,
     PurifierDeviceType, PurifierSetting, PurifierUpdateSettingResponse, RefreshSessionResponse,
     RegionServersPayload, RegionServersResponse, RepeatSchedule, RequestLoginCodeResponse, Session,
-    SoundId,
+    SoundId, flatten_devices,
 };
+#[cfg(any(feature = "async", feature = "blocking"))]
+use secrecy::ExposeSecret;
+
+pub use petkit_protocol::{FountainBleClient, FountainBleSettings};
 
 #[cfg(feature = "action-adapter")]
 pub mod action_adapter;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ClientError<E> {
+    #[error("transport error: {0}")]
     Transport(E),
-    Protocol(PetkitError),
+    #[error("protocol error: {0}")]
+    Protocol(#[from] PetkitError),
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -57,26 +62,6 @@ pub enum DiscoveredDeviceDetail {
     Fountain(FountainDeviceDetailResponse),
     Purifier(PurifierDeviceDetailResponse),
 }
-
-impl<E> From<PetkitError> for ClientError<E> {
-    fn from(value: PetkitError) -> Self {
-        Self::Protocol(value)
-    }
-}
-
-impl<E> fmt::Display for ClientError<E>
-where
-    E: fmt::Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Transport(error) => write!(f, "transport error: {error}"),
-            Self::Protocol(error) => write!(f, "protocol error: {error}"),
-        }
-    }
-}
-
-impl<E> std::error::Error for ClientError<E> where E: std::error::Error + 'static {}
 
 #[cfg(feature = "async")]
 pub trait AsyncTransport {
@@ -188,7 +173,7 @@ where
             )
             .await?;
         let session = response.session;
-        self.auth.set_session(&session.id);
+        self.auth.set_session(session.id.expose_secret());
         Ok(session)
     }
 
@@ -203,7 +188,7 @@ where
             .execute_typed(self.public.login_with_code(username, valid_code, region))
             .await?;
         let session = response.session;
-        self.auth.set_session(&session.id);
+        self.auth.set_session(session.id.expose_secret());
         Ok(session)
     }
 
@@ -212,7 +197,7 @@ where
         let response: RefreshSessionResponse =
             self.execute_typed(self.auth.refresh_session()).await?;
         let session = response.session;
-        self.auth.set_session(&session.id);
+        self.auth.set_session(session.id.expose_secret());
         Ok(session)
     }
 
@@ -342,7 +327,7 @@ where
             region,
         ))?;
         let session = response.session;
-        self.auth.set_session(&session.id);
+        self.auth.set_session(session.id.expose_secret());
         Ok(session)
     }
 
@@ -356,7 +341,7 @@ where
         let response: LoginResponse =
             self.execute_typed(self.public.login_with_code(username, valid_code, region))?;
         let session = response.session;
-        self.auth.set_session(&session.id);
+        self.auth.set_session(session.id.expose_secret());
         Ok(session)
     }
 
@@ -364,7 +349,7 @@ where
     pub fn refresh_session(&mut self) -> Result<Session, ClientError<T::Error>> {
         let response: RefreshSessionResponse = self.execute_typed(self.auth.refresh_session())?;
         let session = response.session;
-        self.auth.set_session(&session.id);
+        self.auth.set_session(session.id.expose_secret());
         Ok(session)
     }
 
@@ -479,12 +464,24 @@ impl<'a, T> AsyncAuthenticatedClient<'a, T> {
         &self,
         device_type: FountainDeviceType,
         device_id: DeviceId,
-    ) -> AsyncFountainClient<'a, T> {
-        AsyncFountainClient {
+    ) -> AsyncFountainCloudClient<'a, T> {
+        self.fountain_cloud(device_type, device_id)
+    }
+
+    pub fn fountain_cloud(
+        &self,
+        device_type: FountainDeviceType,
+        device_id: DeviceId,
+    ) -> AsyncFountainCloudClient<'a, T> {
+        AsyncFountainCloudClient {
             client: self.client,
             device_type,
             device_id,
         }
+    }
+
+    pub fn fountain_ble(&self, device_type: FountainDeviceType) -> FountainBleClient {
+        FountainBleClient::new(device_type)
     }
 
     pub fn purifier(
@@ -619,12 +616,24 @@ impl<'a, T> BlockingAuthenticatedClient<'a, T> {
         &self,
         device_type: FountainDeviceType,
         device_id: DeviceId,
-    ) -> BlockingFountainClient<'a, T> {
-        BlockingFountainClient {
+    ) -> BlockingFountainCloudClient<'a, T> {
+        self.fountain_cloud(device_type, device_id)
+    }
+
+    pub fn fountain_cloud(
+        &self,
+        device_type: FountainDeviceType,
+        device_id: DeviceId,
+    ) -> BlockingFountainCloudClient<'a, T> {
+        BlockingFountainCloudClient {
             client: self.client,
             device_type,
             device_id,
         }
+    }
+
+    pub fn fountain_ble(&self, device_type: FountainDeviceType) -> FountainBleClient {
+        FountainBleClient::new(device_type)
     }
 
     pub fn purifier(
@@ -1470,14 +1479,17 @@ where
 
 #[cfg(feature = "async")]
 #[derive(Debug)]
-pub struct AsyncFountainClient<'a, T> {
+pub struct AsyncFountainCloudClient<'a, T> {
     client: &'a AsyncPetkitClient<T>,
     device_type: FountainDeviceType,
     device_id: DeviceId,
 }
 
 #[cfg(feature = "async")]
-impl<T> AsyncFountainClient<'_, T> {
+pub type AsyncFountainClient<'a, T> = AsyncFountainCloudClient<'a, T>;
+
+#[cfg(feature = "async")]
+impl<T> AsyncFountainCloudClient<'_, T> {
     pub fn requests(&self) -> FountainScope {
         self.client.auth.fountain(self.device_type, self.device_id)
     }
@@ -1488,7 +1500,7 @@ impl<T> AsyncFountainClient<'_, T> {
 }
 
 #[cfg(feature = "async")]
-impl<T> AsyncFountainClient<'_, T>
+impl<T> AsyncFountainCloudClient<'_, T>
 where
     T: AsyncTransport,
 {
@@ -1512,14 +1524,17 @@ where
 
 #[cfg(feature = "blocking")]
 #[derive(Debug)]
-pub struct BlockingFountainClient<'a, T> {
+pub struct BlockingFountainCloudClient<'a, T> {
     client: &'a BlockingPetkitClient<T>,
     device_type: FountainDeviceType,
     device_id: DeviceId,
 }
 
 #[cfg(feature = "blocking")]
-impl<T> BlockingFountainClient<'_, T> {
+pub type BlockingFountainClient<'a, T> = BlockingFountainCloudClient<'a, T>;
+
+#[cfg(feature = "blocking")]
+impl<T> BlockingFountainCloudClient<'_, T> {
     pub fn requests(&self) -> FountainScope {
         self.client.auth.fountain(self.device_type, self.device_id)
     }
@@ -1530,7 +1545,7 @@ impl<T> BlockingFountainClient<'_, T> {
 }
 
 #[cfg(feature = "blocking")]
-impl<T> BlockingFountainClient<'_, T>
+impl<T> BlockingFountainCloudClient<'_, T>
 where
     T: BlockingTransport,
 {
@@ -2005,7 +2020,7 @@ pub mod reqwest_async {
 
     use petkit_protocol::RequestSpec;
 
-    use super::{request_method, response_headers, AsyncTransport};
+    use super::{AsyncTransport, request_method, response_headers};
 
     #[derive(Debug)]
     pub struct ReqwestAsyncTransport {
@@ -2084,7 +2099,7 @@ pub mod reqwest_async {
 pub mod reqwest_blocking {
     use petkit_protocol::{RequestSpec, ResponseParts};
 
-    use super::{request_method, response_headers, BlockingTransport};
+    use super::{BlockingTransport, request_method, response_headers};
 
     #[derive(Debug)]
     pub struct ReqwestBlockingTransport {
@@ -2290,7 +2305,7 @@ mod tests {
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::cell::RefCell;
     #[cfg(feature = "async")]
-    use std::future::{ready, Future};
+    use std::future::{Future, ready};
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::rc::Rc;
 
@@ -2298,12 +2313,18 @@ mod tests {
     use futures::executor::block_on;
 
     use petkit_protocol::{
-        BaseUrl, D4shFeeder, Header, HttpMethod, RequestSpec, ResponseParts, T6Litter,
+        BaseUrl, BleGattWriter, D4shFeeder, Header, HttpMethod, RequestSpec, ResponseParts,
+        T6Litter,
     };
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
-    use petkit_types::{ClientContext, ClientProfile, DeviceId, DeviceSummary, DeviceType};
+    use petkit_types::{
+        ClientContext, ClientProfile, DeviceId, DeviceSummary, DeviceType, FountainAction,
+        FountainDeviceType,
+    };
 
+    #[cfg(feature = "blocking")]
+    use super::FountainBleSettings;
     #[cfg(feature = "blocking")]
     use super::blocking_host_callback::BlockingHostCallbackTransport;
     use super::hash_password_md5;
@@ -2313,6 +2334,8 @@ mod tests {
     use super::{AsyncPetkitClient, AsyncTransport, DiscoveredDeviceDetail};
     #[cfg(feature = "blocking")]
     use super::{BlockingPetkitClient, BlockingTransport};
+    #[cfg(feature = "blocking")]
+    use secrecy::ExposeSecret;
 
     #[cfg(feature = "blocking")]
     #[derive(Debug)]
@@ -2375,6 +2398,74 @@ mod tests {
 
     #[cfg(feature = "blocking")]
     #[test]
+    fn blocking_fountain_ble_client_writes_actions_without_http_transport() {
+        #[derive(Default)]
+        struct Writer {
+            frames: Vec<Vec<u8>>,
+        }
+
+        impl BleGattWriter for Writer {
+            type Error = std::convert::Infallible;
+
+            fn write_frame(&mut self, frame: &[u8]) -> Result<(), Self::Error> {
+                self.frames.push(frame.to_vec());
+                Ok(())
+            }
+        }
+
+        let transport = MockBlockingTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(200, vec![], br#"{"result":{}}"#.to_vec()),
+        };
+        let client = BlockingPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let fountain = client.authenticated().fountain_ble(FountainDeviceType::W5);
+        let mut writer = Writer::default();
+
+        let pause = fountain
+            .pause(&mut writer, 5)
+            .expect("pause frame should write");
+        let power = fountain
+            .power(&mut writer, true, 6)
+            .expect("power frame should write");
+        let reset = fountain
+            .reset_filter(&mut writer, 7)
+            .expect("reset frame should write");
+        let resume_command = fountain
+            .command(FountainAction::Continue, 8)
+            .expect("resume command should build");
+        let settings = FountainBleSettings::new(5, 40, true, 2, 300, 600, false, 1320, 360)
+            .expect("settings should be valid");
+        let dnd = fountain
+            .execute_with_settings(&mut writer, FountainAction::DoNotDisturb, 9, &settings)
+            .expect("dnd frame should write");
+
+        assert_eq!(pause.cmd, 220);
+        assert_eq!(power.cmd, 220);
+        assert_eq!(reset.cmd, 222);
+        assert_eq!(dnd.cmd, 221);
+        assert_eq!(
+            writer.frames,
+            vec![
+                pause.frame.clone(),
+                power.frame.clone(),
+                reset.frame.clone(),
+                dnd.frame.clone()
+            ]
+        );
+        assert_eq!(resume_command.frame[5], 8);
+        assert!(
+            client
+                .transport
+                .last_request
+                .lock()
+                .expect("request mutex should not be poisoned")
+                .is_none(),
+            "BLE helpers must not use the HTTP transport"
+        );
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
     fn blocking_client_builds_login_request_and_parses_session() {
         let transport = MockBlockingTransport {
             last_request: Mutex::new(None),
@@ -2397,7 +2488,7 @@ mod tests {
             .clone()
             .expect("login request should be captured");
 
-        assert_eq!(session.id, "s1");
+        assert_eq!(session.id.expose_secret(), "s1");
         assert_eq!(request.path, "user/login");
         // After login, the session id is persisted on the client.
         assert_eq!(client.authenticated().session_id(), "s1");

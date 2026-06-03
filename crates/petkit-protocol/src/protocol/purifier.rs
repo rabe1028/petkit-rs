@@ -1,6 +1,6 @@
 use alloc::string::ToString;
 
-use petkit_types::{to_kv_string, DeviceId, PurifierControl, PurifierDeviceType, PurifierSetting};
+use petkit_types::{DeviceId, PurifierControl, PurifierDeviceType, PurifierSetting, to_kv_string};
 
 use crate::{HttpMethod, RequestSpec};
 

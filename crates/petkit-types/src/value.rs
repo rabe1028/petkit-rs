@@ -18,6 +18,7 @@ macro_rules! non_zero_id {
                 })
             }
 
+            #[must_use]
             pub const fn get(self) -> u64 {
                 self.0.get()
             }
@@ -68,6 +69,7 @@ impl ScheduleLimit {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u16 {
         self.0.get()
     }
@@ -93,6 +95,7 @@ impl VolumeLevel {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u8 {
         self.0
     }
@@ -112,6 +115,7 @@ impl FeederSurplusGrams {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u16 {
         self.0
     }
@@ -131,6 +135,7 @@ impl LitterStillTimeSeconds {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u16 {
         self.0
     }
@@ -150,6 +155,7 @@ impl LitterSandType {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u8 {
         self.0
     }
@@ -173,6 +179,7 @@ impl PetWeightGrams {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u32 {
         self.0.get()
     }
@@ -192,6 +199,7 @@ impl LitterWorkMode {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u8 {
         self.0
     }
@@ -217,6 +225,7 @@ impl LitterModeValue {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u8 {
         self.0
     }
@@ -236,6 +245,7 @@ impl CalibrationAction {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> i32 {
         self.0
     }
@@ -255,6 +265,7 @@ impl RepeatDays {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u8 {
         self.0
     }
@@ -281,6 +292,7 @@ impl ControlCommandType {
         }
     }
 
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         self.0
     }
@@ -300,6 +312,7 @@ impl SettingInt {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> i64 {
         self.0
     }
@@ -320,6 +333,7 @@ impl SettingString {
         }
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -335,6 +349,7 @@ impl PetkitDay {
         Ok(Self(value))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -362,6 +377,7 @@ impl FeedTime {
         }
     }
 
+    #[must_use]
     pub const fn get(self) -> u16 {
         self.0
     }
