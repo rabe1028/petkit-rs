@@ -310,9 +310,10 @@ where
     }
 
     pub fn start_live(&self) -> RequestSpec {
-        self.request(LIVE_ENDPOINT)
-            .push_form_field("definition", "2")
-            .push_form_field("deviceId", self.device_id.to_string())
+        self.auth
+            .device_request(self.device_type.as_str(), LIVE_ENDPOINT, HttpMethod::Get)
+            .push_query("definition", "2")
+            .push_query("deviceId", self.device_id.to_string())
     }
 
     pub fn cloud_video(&self) -> RequestSpec {

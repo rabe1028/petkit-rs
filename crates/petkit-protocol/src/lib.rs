@@ -44,9 +44,10 @@ mod tests {
     };
 
     use super::{
-        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, DualManualFeedAmount,
-        FeederMiniFeeder, FountainBleClient, FountainBleSettings, PublicProtocol, ResponseParts,
-        SingleManualFeedAmount, build_ble_frame, build_fountain_ble_command,
+        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, D4shFeeder,
+        DualManualFeedAmount, FeederMiniFeeder, FountainBleClient, FountainBleSettings,
+        HttpMethod, PublicProtocol, ResponseParts, SingleManualFeedAmount, T6Litter,
+        build_ble_frame, build_fountain_ble_command,
         camera_rtm_peer_message, parse_api_response, parse_text_response, write_fountain_ble_frame,
     };
 
@@ -313,6 +314,43 @@ mod tests {
         let body = request.body.expect("json body should exist").body;
         assert!(body.contains(r#""destination":"dev_2001""#));
         assert!(body.contains(r#""cmd\":\"ptz_ctrl\""#));
+    }
+
+    #[test]
+    fn camera_start_live_uses_get_query_parameters() {
+        use petkit_types::LitterDeviceType;
+
+        let feeder = authenticated()
+            .feeder(FeederDeviceType::D4sh, device_id(42))
+            .with_model::<D4shFeeder>()
+            .start_live();
+        assert_eq!(feeder.method, HttpMethod::Get);
+        assert_eq!(feeder.form_fields, []);
+        assert!(
+            feeder
+                .query
+                .iter()
+                .any(|field| field.name == "deviceId" && field.value == "42")
+        );
+        assert!(
+            feeder
+                .query
+                .iter()
+                .any(|field| field.name == "definition" && field.value == "2")
+        );
+
+        let litter = authenticated()
+            .litter(LitterDeviceType::T6, device_id(77))
+            .with_model::<T6Litter>()
+            .start_live();
+        assert_eq!(litter.method, HttpMethod::Get);
+        assert_eq!(litter.form_fields, []);
+        assert!(
+            litter
+                .query
+                .iter()
+                .any(|field| field.name == "deviceId" && field.value == "77")
+        );
     }
 
     #[test]

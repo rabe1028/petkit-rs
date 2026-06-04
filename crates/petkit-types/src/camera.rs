@@ -62,7 +62,8 @@ impl CameraRtmCommand {
     pub fn payload_json(&self) -> String {
         match self {
             Self::StartLive { is_sd } => {
-                format!(r#"{{"cmd":"start_live","payload":{{"is_sd":{is_sd}}}}}"#)
+                let is_sd = i64::from(*is_sd);
+                format!(r#"{{"cmd":"start_live","payload":{{"isSD":{is_sd}}}}}"#)
             }
             Self::StopLive => String::from(r#"{"cmd":"stop_live"}"#),
             Self::PtzControl { kind, direction } => format!(
@@ -185,6 +186,14 @@ mod tests {
     use nojson::RawJson;
 
     use super::*;
+
+    #[test]
+    fn start_live_payload_uses_agora_petkit_is_sd_key() {
+        assert_eq!(
+            CameraRtmCommand::StartLive { is_sd: false }.payload_json(),
+            r#"{"cmd":"start_live","payload":{"isSD":0}}"#
+        );
+    }
 
     #[test]
     fn agora_rtm_response_accepts_string_result_and_codes() {
