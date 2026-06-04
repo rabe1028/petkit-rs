@@ -60,10 +60,13 @@ pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction,
             )?)?),
         )),
         "update_setting" => Ok(ParsedAction::UpdateSetting(parse_custom_setting(args)?)),
-        "camera_ptz" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::PtzControl {
-            kind: PtzKind::Move,
-            direction: parse_ptz_direction(args)?,
-        })),
+        "camera_ptz" => {
+            let direction = parse_ptz_direction(args)?;
+            Ok(ParsedAction::CameraRtm(CameraRtmCommand::PtzControl {
+                kind: ptz_kind_for_direction(direction),
+                direction,
+            }))
+        }
         "camera_heartbeat" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::Heartbeat)),
         "camera_start_live" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::StartLive {
             is_sd: parse_optional_bool(args, "is_sd")?.unwrap_or(false),
@@ -449,6 +452,17 @@ fn parse_ptz_direction(args: &[(&str, &str)]) -> Result<PtzDirection, PetkitErro
     }
 }
 
+fn ptz_kind_for_direction(direction: PtzDirection) -> PtzKind {
+    match direction {
+        PtzDirection::Stop => PtzKind::Stop,
+        PtzDirection::Up
+        | PtzDirection::Down
+        | PtzDirection::Left
+        | PtzDirection::Right
+        | PtzDirection::Custom(_) => PtzKind::Move,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -579,6 +593,17 @@ mod tests {
             ParsedAction::CameraRtm(CameraRtmCommand::PtzControl {
                 kind: PtzKind::Move,
                 direction: PtzDirection::Left
+            })
+        );
+    }
+
+    #[test]
+    fn parses_camera_ptz_stop_as_stop_command_type() {
+        assert_eq!(
+            parse_action("camera_ptz", &[("direction", "stop")]).expect("camera ptz should parse"),
+            ParsedAction::CameraRtm(CameraRtmCommand::PtzControl {
+                kind: PtzKind::Stop,
+                direction: PtzDirection::Stop
             })
         );
     }

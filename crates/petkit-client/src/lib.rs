@@ -1070,13 +1070,16 @@ where
     ) -> Result<CloudBlePollState, ClientError<T::Error>> {
         let max_polls = options.max_polls.max(1);
         let mut last_state = CloudBlePollState::NotConnected;
-        for _ in 0..max_polls {
+        for poll_index in 0..max_polls {
             last_state = self.poll(request).await?;
             if matches!(
                 last_state,
                 CloudBlePollState::Connected | CloudBlePollState::Failed
             ) {
                 break;
+            }
+            if poll_index + 1 < max_polls && !options.poll_interval.is_zero() {
+                futures_timer::Delay::new(options.poll_interval).await;
             }
         }
         Ok(last_state)
@@ -3004,9 +3007,13 @@ mod tests {
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::cell::RefCell;
     #[cfg(feature = "async")]
+    use std::collections::VecDeque;
+    #[cfg(feature = "async")]
     use std::future::{Future, ready};
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::rc::Rc;
+    #[cfg(feature = "async")]
+    use std::time::{Duration, Instant};
 
     #[cfg(feature = "async")]
     use futures::executor::block_on;
@@ -3018,10 +3025,13 @@ mod tests {
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
     use petkit_types::{
-        ClientContext, ClientProfile, CloudBleDevice, DeviceDetailResponse, DeviceId,
-        DeviceSummary, DeviceType, FountainAction, FountainDeviceType,
+        ClientContext, ClientProfile, CloudBleDevice, CloudBleMetadata, CloudBleRelayOptions,
+        DeviceDetailResponse, DeviceId, DeviceSummary, DeviceType, FountainAction,
+        FountainDeviceType,
     };
 
+    #[cfg(feature = "async")]
+    use super::FountainBleClient;
     #[cfg(feature = "blocking")]
     use super::FountainBleSettings;
     #[cfg(feature = "blocking")]
@@ -3078,6 +3088,35 @@ mod tests {
                 .expect("request mutex should not be poisoned")
                 .replace(request);
             ready(Ok(self.response.clone()))
+        }
+    }
+
+    #[cfg(feature = "async")]
+    #[derive(Debug)]
+    struct SequenceAsyncTransport {
+        paths: Mutex<Vec<String>>,
+        responses: Mutex<VecDeque<ResponseParts>>,
+    }
+
+    #[cfg(feature = "async")]
+    impl AsyncTransport for SequenceAsyncTransport {
+        type Error = std::convert::Infallible;
+
+        fn send(
+            &self,
+            request: RequestSpec,
+        ) -> impl Future<Output = Result<ResponseParts, Self::Error>> {
+            self.paths
+                .lock()
+                .expect("paths mutex should not be poisoned")
+                .push(request.path);
+            let response = self
+                .responses
+                .lock()
+                .expect("responses mutex should not be poisoned")
+                .pop_front()
+                .expect("test response should exist");
+            ready(Ok(response))
         }
     }
 
@@ -3514,6 +3553,59 @@ mod tests {
             .clone()
             .expect("detail request should be captured");
         assert_eq!(request.path, "d4s/device_detail");
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_cloud_ble_poll_honors_interval_between_connecting_polls() {
+        let poll_interval = Duration::from_millis(10);
+        let transport = SequenceAsyncTransport {
+            paths: Mutex::new(Vec::new()),
+            responses: Mutex::new(VecDeque::from([
+                ResponseParts::new(200, vec![], br#"{"result":true}"#.to_vec()),
+                ResponseParts::new(200, vec![], br#"{"result":{"state":0}}"#.to_vec()),
+                ResponseParts::new(200, vec![], br#"{"result":{"state":1}}"#.to_vec()),
+                ResponseParts::new(200, vec![], br#"{"result":true}"#.to_vec()),
+            ])),
+        };
+        let client = AsyncPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let metadata = CloudBleMetadata {
+            device_type: String::from("ctw3"),
+            mac: String::from("aa:bb"),
+            group_id: Some(String::from("7")),
+            ble_id: Some(String::from("ble-42")),
+        };
+
+        let started = Instant::now();
+        let response = block_on(
+            client
+                .authenticated()
+                .cloud_ble()
+                .execute_fountain_with_options(
+                    "42",
+                    &metadata,
+                    FountainBleClient::new(FountainDeviceType::Ctw3),
+                    FountainAction::PowerOff,
+                    1,
+                    CloudBleRelayOptions::new(poll_interval, 3),
+                ),
+        )
+        .expect("fountain cloud BLE command should execute");
+
+        assert!(response.accepted);
+        assert!(
+            started.elapsed() >= Duration::from_millis(5),
+            "async Cloud BLE retry loop should wait between Connecting polls"
+        );
+        assert_eq!(
+            client
+                .transport
+                .paths
+                .lock()
+                .expect("paths mutex should not be poisoned")
+                .as_slice(),
+            ["ble/connect", "ble/poll", "ble/poll", "ble/controlDevice"]
+        );
     }
 
     #[test]
