@@ -160,8 +160,25 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for DeviceDetailResponse {
             name,
             device_type: optional_string_any(value, &["deviceType", "typeName", "type_name"])?,
             group_id: optional_u64_member(value.to_member("groupId")?)?,
-            mac: optional_string_any(value, &["mac", "btMac", "bt_mac", "deviceMac"])?,
-            ble_id: optional_string_any(value, &["bleId", "ble_id"])?,
+            mac: optional_string_any_deep(
+                value,
+                &[
+                    "mac",
+                    "btMac",
+                    "bt_mac",
+                    "deviceMac",
+                    "bleMac",
+                    "ble_mac",
+                    "bluetoothMac",
+                    "bluetooth_mac",
+                    "macAddress",
+                    "mac_address",
+                ],
+            )?,
+            ble_id: optional_string_any_deep(
+                value,
+                &["bleId", "ble_id", "bleDeviceId", "ble_device_id"],
+            )?,
             sn: optional_string_member(value.to_member("sn")?)?,
             firmware: optional_text_member(value.to_member("firmware")?)?,
             settings: optional_raw_member(value.to_member("settings")?)?,
@@ -438,6 +455,53 @@ fn optional_string_any(
     Ok(None)
 }
 
+fn optional_string_any_deep(
+    value: RawJsonValue<'_, '_>,
+    names: &[&str],
+) -> Result<Option<String>, JsonParseError> {
+    optional_string_any_deep_inner(value, names, 0)
+}
+
+fn optional_string_any_deep_inner(
+    value: RawJsonValue<'_, '_>,
+    names: &[&str],
+    depth: usize,
+) -> Result<Option<String>, JsonParseError> {
+    if value.kind() != JsonValueKind::Object {
+        return Ok(None);
+    }
+    if let Some(found) = optional_string_any(value, names)? {
+        return Ok(Some(found));
+    }
+    if depth >= 4 {
+        return Ok(None);
+    }
+    for (_, member) in value.to_object()? {
+        match member.kind() {
+            JsonValueKind::Object => {
+                if let Some(found) = optional_string_any_deep_inner(member, names, depth + 1)? {
+                    return Ok(Some(found));
+                }
+            }
+            JsonValueKind::Array => {
+                for item in member.to_array()? {
+                    if item.kind() == JsonValueKind::Object
+                        && let Some(found) = optional_string_any_deep_inner(item, names, depth + 1)?
+                    {
+                        return Ok(Some(found));
+                    }
+                }
+            }
+            JsonValueKind::Null
+            | JsonValueKind::Boolean
+            | JsonValueKind::Integer
+            | JsonValueKind::Float
+            | JsonValueKind::String => {}
+        }
+    }
+    Ok(None)
+}
+
 fn live_feed_payload<'text, 'raw>(
     value: RawJsonValue<'text, 'raw>,
 ) -> Result<RawJsonValue<'text, 'raw>, JsonParseError> {
@@ -675,6 +739,17 @@ mod tests {
                 .text(),
             "2"
         );
+    }
+
+    #[test]
+    fn device_detail_response_finds_nested_cloud_ble_identifiers() {
+        let response = with_result(
+            r#"{"result":{"id":1000024016,"name":"ctw3 fountain","deviceType":"ctw3","deviceInfo":{"bluetoothMac":"aa:bb:cc:dd:ee:ff","bleDeviceId":"ble-ctw3"},"settings":{},"state":{}}}"#,
+            |value| DeviceDetailResponse::try_from(value).expect("device detail should parse"),
+        );
+
+        assert_eq!(response.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+        assert_eq!(response.ble_id.as_deref(), Some("ble-ctw3"));
     }
 
     #[test]

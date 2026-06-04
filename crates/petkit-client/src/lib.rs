@@ -964,7 +964,7 @@ where
             return Ok(Some(metadata));
         }
         let detail_metadata = match self.client.authenticated().device_detail_for(device).await {
-            Ok(detail) => discovered_cloud_ble_metadata(detail),
+            Ok(detail) => discovered_cloud_ble_metadata_for_summary(device, detail),
             Err(_) => None,
         };
         if detail_metadata.is_some() {
@@ -1168,7 +1168,7 @@ where
             return Ok(Some(metadata));
         }
         let detail_metadata = match self.client.authenticated().device_detail_for(device) {
-            Ok(detail) => discovered_cloud_ble_metadata(detail),
+            Ok(detail) => discovered_cloud_ble_metadata_for_summary(device, detail),
             Err(_) => None,
         };
         if detail_metadata.is_some() {
@@ -1287,13 +1287,34 @@ where
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
-fn discovered_cloud_ble_metadata(detail: DiscoveredDeviceDetail) -> Option<CloudBleMetadata> {
-    match detail {
-        DiscoveredDeviceDetail::Feeder(response) => response.cloud_ble_metadata(),
-        DiscoveredDeviceDetail::Litter(response) => response.cloud_ble_metadata(),
-        DiscoveredDeviceDetail::Fountain(response) => response.cloud_ble_metadata(),
-        DiscoveredDeviceDetail::Purifier(response) => response.cloud_ble_metadata(),
-    }
+fn discovered_cloud_ble_metadata_for_summary(
+    device: &DeviceSummary,
+    detail: DiscoveredDeviceDetail,
+) -> Option<CloudBleMetadata> {
+    let detail = match detail {
+        DiscoveredDeviceDetail::Feeder(response)
+        | DiscoveredDeviceDetail::Litter(response)
+        | DiscoveredDeviceDetail::Fountain(response)
+        | DiscoveredDeviceDetail::Purifier(response) => response,
+    };
+    let mac = non_empty_string(detail.mac.clone())?;
+    let device_type = non_empty_string(detail.device_type.clone())
+        .unwrap_or_else(|| device.device_type.as_str().to_string());
+    Some(CloudBleMetadata {
+        device_type,
+        mac,
+        group_id: detail
+            .group_id
+            .map(|group_id| group_id.to_string())
+            .or_else(|| Some(device.group_id.to_string())),
+        ble_id: non_empty_string(detail.ble_id.clone())
+            .or_else(|| non_empty_string(device.ble_id.clone())),
+    })
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn non_empty_string(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty())
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -1312,8 +1333,7 @@ fn match_cloud_ble_metadata(
             (matches.len() == 1)
                 .then(|| matches.first().copied())
                 .flatten()
-        })
-        .or_else(|| (relays.len() == 1).then(|| relays.first()).flatten())?;
+        })?;
     Some(CloudBleMetadata {
         device_type: device.device_type.as_str().to_string(),
         mac: relay.mac.clone(),
@@ -2998,8 +3018,8 @@ mod tests {
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
     use petkit_types::{
-        ClientContext, ClientProfile, CloudBleDevice, DeviceId, DeviceSummary, DeviceType,
-        FountainAction, FountainDeviceType,
+        ClientContext, ClientProfile, CloudBleDevice, DeviceDetailResponse, DeviceId,
+        DeviceSummary, DeviceType, FountainAction, FountainDeviceType,
     };
 
     #[cfg(feature = "blocking")]
@@ -3012,7 +3032,9 @@ mod tests {
     use super::{AsyncPetkitClient, AsyncTransport, DiscoveredDeviceDetail};
     #[cfg(feature = "blocking")]
     use super::{BlockingPetkitClient, BlockingTransport};
-    use super::{hash_password_md5, match_cloud_ble_metadata};
+    use super::{
+        discovered_cloud_ble_metadata_for_summary, hash_password_md5, match_cloud_ble_metadata,
+    };
     #[cfg(feature = "blocking")]
     use secrecy::ExposeSecret;
 
@@ -3541,6 +3563,106 @@ mod tests {
         };
 
         assert!(match_cloud_ble_metadata(&summary, &[]).is_none());
+    }
+
+    #[test]
+    fn cloud_ble_metadata_ignores_unrelated_single_relay_candidate() {
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-42"),
+        };
+        let relays = [CloudBleDevice {
+            id: String::from("camera-relay"),
+            mac: String::from("aa:bb"),
+            name: Some(String::from("camera")),
+            sn: None,
+            pim: None,
+            type_id: Some(99),
+            low_version: None,
+        }];
+
+        assert!(match_cloud_ble_metadata(&summary, &relays).is_none());
+    }
+
+    #[test]
+    fn cloud_ble_metadata_can_be_resolved_from_fountain_detail_mac() {
+        let summary = DeviceSummary {
+            device_id: 1_000_024_016,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-1000024016"),
+        };
+        let detail = DiscoveredDeviceDetail::Fountain(DeviceDetailResponse {
+            id: Some(1_000_024_016),
+            name: Some(String::from("fountain")),
+            device_type: None,
+            group_id: None,
+            mac: Some(String::from("aa:bb:cc:dd:ee:ff")),
+            ble_id: Some(String::from("ble-ctw3")),
+            sn: None,
+            firmware: None,
+            settings: None,
+            state: None,
+        });
+
+        let metadata = discovered_cloud_ble_metadata_for_summary(&summary, detail)
+            .expect("detail mac should complete cloud BLE metadata");
+
+        assert_eq!(metadata.device_type, "ctw3");
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.group_id.as_deref(), Some("7"));
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_cloud_ble_metadata_prefers_summary_mac_without_lookup() {
+        let transport = MockBlockingTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(200, vec![], br#"{"result":[]}"#.to_vec()),
+        };
+        let client = BlockingPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: Some(String::from("aa:bb")),
+            ble_id: Some(String::from("ble-42")),
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-42"),
+        };
+
+        let metadata = client
+            .authenticated()
+            .cloud_ble()
+            .resolve_cloud_ble_metadata(&summary)
+            .expect("summary metadata should resolve")
+            .expect("summary mac should produce metadata");
+
+        assert_eq!(metadata.mac, "aa:bb");
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
+        assert!(
+            client
+                .transport
+                .last_request
+                .lock()
+                .expect("request mutex should not be poisoned")
+                .is_none()
+        );
     }
 
     #[cfg(feature = "async")]

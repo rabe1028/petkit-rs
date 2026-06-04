@@ -57,6 +57,7 @@ To force a specific discovered device, each family also accepts optional
 | `ureq` blocking | litter | `cargo run -p petkit-client --example ureq_blocking_litter_detail --no-default-features --features blocking,ureq-blocking` |
 | `ureq` blocking | purifier | `cargo run -p petkit-client --example ureq_blocking_purifier_detail --no-default-features --features blocking,ureq-blocking` |
 | `reqwest` blocking | Cloud BLE relay probe | `cargo run -p petkit-client --example reqwest_blocking_cloud_ble_probe --no-default-features --features blocking,reqwest-blocking` |
+| `reqwest` blocking | fountain detail/BLE metadata probe | `cargo run -p petkit-client --example reqwest_blocking_fountain_detail_probe --no-default-features --features blocking,reqwest-blocking` |
 | `reqwest` async | camera live-feed probe | `cargo run -p petkit-client --example reqwest_async_camera_live_feed_probe --no-default-features --features async,reqwest-async` |
 | host callback async | canned transport | `cargo run -p petkit-client --example host_callback_async --no-default-features --features async` |
 | host callback blocking | canned transport | `cargo run -p petkit-client --example host_callback_blocking --no-default-features --features blocking` |

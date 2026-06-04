@@ -8,8 +8,8 @@ use nojson::{JsonValueKind, RawJsonOwned};
 use petkit_protocol::BaseUrl;
 use petkit_types::{
     AccountGroup, ClientContext, ClientProfile, DeviceDetailResponse, DeviceId, DeviceSummary,
-    DeviceType, FeederDeviceType, LitterDeviceType, PetkitError, PurifierDeviceType,
-    RegionServersPayload, flatten_devices,
+    DeviceType, FeederDeviceType, FountainDeviceType, LitterDeviceType, PetkitError,
+    PurifierDeviceType, RegionServersPayload, flatten_devices,
 };
 
 #[derive(Clone, Debug)]
@@ -86,6 +86,18 @@ pub(crate) fn select_litter_device(
         "PETKIT_LITTER_DEVICE_ID",
         "PETKIT_LITTER_DEVICE_TYPE",
         "PETKIT_LITTER_DEVICE_NAME",
+    )
+}
+
+pub(crate) fn select_fountain_device(
+    groups: &[AccountGroup],
+) -> Result<SelectedDevice<FountainDeviceType>, io::Error> {
+    select_device::<FountainDeviceType>(
+        groups,
+        "fountain",
+        "PETKIT_FOUNTAIN_DEVICE_ID",
+        "PETKIT_FOUNTAIN_DEVICE_TYPE",
+        "PETKIT_FOUNTAIN_DEVICE_NAME",
     )
 }
 
