@@ -3,6 +3,8 @@ use alloc::string::String;
 
 use nojson::{JsonParseError, JsonValueKind, RawJsonValue};
 
+pub const PETKIT_AGORA_APP_ID: &str = "244c49951296440cbc1e3b937bf5e410";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PtzKind {
     Move,

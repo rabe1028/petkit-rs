@@ -1309,9 +1309,11 @@ fn match_cloud_ble_metadata(
                 .iter()
                 .filter(|relay| cloud_ble_relay_matches_type(device, relay))
                 .collect::<Vec<_>>();
-            (matches.len() == 1).then_some(matches[0])
+            (matches.len() == 1)
+                .then(|| matches.first().copied())
+                .flatten()
         })
-        .or_else(|| (relays.len() == 1).then_some(&relays[0]))?;
+        .or_else(|| (relays.len() == 1).then(|| relays.first()).flatten())?;
     Some(CloudBleMetadata {
         device_type: device.device_type.as_str().to_string(),
         mac: relay.mac.clone(),
@@ -3522,6 +3524,23 @@ mod tests {
         assert_eq!(metadata.mac, "aa:bb");
         assert_eq!(metadata.group_id.as_deref(), Some("7"));
         assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_match_does_not_panic_without_relay_candidates() {
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::W5,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("w5-42"),
+        };
+
+        assert!(match_cloud_ble_metadata(&summary, &[]).is_none());
     }
 
     #[cfg(feature = "async")]

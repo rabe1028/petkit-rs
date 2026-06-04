@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use nojson::{JsonParseError, JsonValueKind, RawJsonOwned, RawJsonValue};
 
-use crate::{AccountGroup, IotConfigSet, RegionServersPayload, Session};
+use crate::{AccountGroup, IotConfigSet, PETKIT_AGORA_APP_ID, RegionServersPayload, Session};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegionServersResponse {
@@ -288,7 +288,7 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LiveFeedResponse {
     fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let payload = live_feed_payload(value)?;
         let whep_url = optional_string_any(payload, &["whepUrl", "whep_url", "whep"])?;
-        let app_id = optional_string_any(payload, &["appId", "app_id"])?;
+        let parsed_app_id = optional_string_any(payload, &["appId", "app_id"])?;
         let channel_id = optional_string_any(payload, &["channelId", "channel_id"])?;
         let rtc_token = optional_string_any(payload, &["rtcToken", "rtc_token"])?;
         let rtm_token = optional_string_any(payload, &["rtmToken", "rtm_token"])?;
@@ -298,12 +298,13 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LiveFeedResponse {
             .or_else(|| uid_from_rtm_user_id(app_rtm_user_id.as_deref()));
         let has_live_payload = channel_id.is_some()
             || whep_url.is_some()
-            || app_id.is_some()
+            || parsed_app_id.is_some()
             || rtc_token.is_some()
             || rtm_token.is_some()
             || uid.is_some()
             || app_rtm_user_id.is_some()
             || dev_rtm_user_id.is_some();
+        let app_id = parsed_app_id.or_else(|| Some(PETKIT_AGORA_APP_ID.to_string()));
         Ok(Self {
             accepted: live_feed_accepted(value, payload, has_live_payload)?,
             whep_url,
@@ -687,6 +688,7 @@ mod tests {
         assert_eq!(response.channel_id.as_deref(), Some("ch-1"));
         assert_eq!(response.rtc_token.as_deref(), Some("rtc"));
         assert_eq!(response.rtm_token.as_deref(), Some("rtm"));
+        assert_eq!(response.app_id.as_deref(), Some(PETKIT_AGORA_APP_ID));
         assert_eq!(response.uid, Some(123));
         assert_eq!(response.app_rtm_user_id.as_deref(), Some("app_123"));
         assert_eq!(response.dev_rtm_user_id.as_deref(), Some("dev_456"));

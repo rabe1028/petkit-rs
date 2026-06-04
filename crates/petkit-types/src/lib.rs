@@ -17,7 +17,9 @@ mod session;
 mod setting;
 mod value;
 
-pub use camera::{AgoraRtmResponse, CameraRtmCommand, PtzDirection, PtzKind, json_string};
+pub use camera::{
+    AgoraRtmResponse, CameraRtmCommand, PETKIT_AGORA_APP_ID, PtzDirection, PtzKind, json_string,
+};
 pub use client::{ClientContext, ClientProfile};
 pub use cloud_ble::{
     CloudBleConnectRequest, CloudBleConnection, CloudBleControlRequest, CloudBleControlResponse,
