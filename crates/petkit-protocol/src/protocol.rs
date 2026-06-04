@@ -24,12 +24,16 @@ use petkit_types::{
 
 use crate::{BaseUrl, HttpMethod, RequestSpec};
 
+mod agora;
+mod cloud_ble;
 mod feeder;
 mod fountain;
 mod litter;
 mod pet;
 mod purifier;
 
+pub use self::agora::*;
+pub use self::cloud_ble::*;
 pub use self::feeder::*;
 pub use self::fountain::*;
 pub use self::litter::*;
@@ -150,6 +154,11 @@ impl AuthenticatedProtocol {
         self.auth.session_id = session_id.into();
     }
 
+    /// Update the regional API base URL used by every subsequent authenticated request.
+    pub fn set_base_url(&mut self, base_url: BaseUrl) {
+        self.auth.base_url = base_url;
+    }
+
     /// Currently-stored session id.
     pub fn session_id(&self) -> &str {
         &self.auth.session_id
@@ -165,6 +174,12 @@ impl AuthenticatedProtocol {
 
     pub fn iot_device_info_v2(&self) -> RequestSpec {
         self.auth.request(HttpMethod::Get, IOT_DEVICE_INFO_V2_PATH)
+    }
+
+    pub fn cloud_ble(&self) -> CloudBleScope {
+        CloudBleScope {
+            auth: self.auth.clone(),
+        }
     }
 
     pub fn feeder(&self, device_type: FeederDeviceType, device_id: DeviceId) -> FeederScope {

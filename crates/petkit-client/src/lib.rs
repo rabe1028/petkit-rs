@@ -8,18 +8,23 @@ use md5::{Digest, Md5};
 use nojson::{JsonParseError, RawJsonValue};
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_protocol::{
-    AuthenticatedProtocol, BaseUrl, DynamicFeeder, DynamicLitter, FeederModel, FeederScope,
+    AuthenticatedProtocol, BaseUrl, CAMERA_RTM_FALLBACK_BASE_URL, CAMERA_RTM_PRIMARY_BASE_URL,
+    CloudBleScope, DynamicFeeder, DynamicLitter, FeederModel, FeederScope,
     FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
     FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope, LitterModel, LitterScope,
     LitterSupportsCamera, LitterSupportsN50Deodorizer, ManualFeedAmount, PetScope, PublicProtocol,
-    PurifierScope, RequestSpec, ResponseParts, parse_api_response,
+    PurifierScope, RequestSpec, ResponseParts, camera_rtm_peer_message_for_base,
+    parse_api_response, parse_json_response,
 };
 use petkit_types::PetkitError;
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_types::{
-    AccountGroup, CalibrationAction, ClientContext, CloudVideoResponse, DeviceCatalog,
-    DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList, FeedEntryId,
-    FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
+    AccountGroup, AgoraRtmResponse, CalibrationAction, CameraLiveFeed, CameraRtmCommand,
+    ClientContext, CloudBleConnectRequest, CloudBleConnection, CloudBleControlRequest,
+    CloudBleControlResponse, CloudBleDevice, CloudBleDevicesResponse, CloudBleMetadata,
+    CloudBlePollRequest, CloudBlePollState, CloudBleRelayOptions, CloudVideoResponse,
+    DeviceCatalog, DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList,
+    FeedEntryId, FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
     FeederCancelManualFeedResponse, FeederDeviceDetailResponse, FeederDeviceType,
     FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
     FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
@@ -134,6 +139,15 @@ impl<T> AsyncPetkitClient<T> {
     pub fn set_session(&mut self, session_id: impl Into<String>) {
         self.auth.set_session(session_id);
     }
+
+    fn apply_login_response(&mut self, response: LoginResponse) -> Session {
+        if let Some(base_url) = response.api_servers.first() {
+            self.auth.set_base_url(BaseUrl::Regional(base_url.clone()));
+        }
+        let session = response.session;
+        self.auth.set_session(session.id.expose_secret());
+        session
+    }
 }
 
 #[cfg(feature = "async")]
@@ -172,8 +186,7 @@ where
                     .login_with_password(username, &password_md5, region),
             )
             .await?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -187,8 +200,7 @@ where
         let response: LoginResponse = self
             .execute_typed(self.public.login_with_code(username, valid_code, region))
             .await?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -239,6 +251,21 @@ where
             .await
             .map_err(ClientError::Transport)?;
         Ok(parse_api_response(&response)?)
+    }
+
+    pub async fn execute_json_typed<R>(
+        &self,
+        request: RequestSpec,
+    ) -> Result<R, ClientError<T::Error>>
+    where
+        R: for<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>, Error = JsonParseError>,
+    {
+        let response = self
+            .transport
+            .send(request)
+            .await
+            .map_err(ClientError::Transport)?;
+        Ok(parse_json_response(&response)?)
     }
 }
 
@@ -294,6 +321,15 @@ impl<T> BlockingPetkitClient<T> {
     pub fn set_session(&mut self, session_id: impl Into<String>) {
         self.auth.set_session(session_id);
     }
+
+    fn apply_login_response(&mut self, response: LoginResponse) -> Session {
+        if let Some(base_url) = response.api_servers.first() {
+            self.auth.set_base_url(BaseUrl::Regional(base_url.clone()));
+        }
+        let session = response.session;
+        self.auth.set_session(session.id.expose_secret());
+        session
+    }
 }
 
 #[cfg(feature = "blocking")]
@@ -326,8 +362,7 @@ where
             &password_md5,
             region,
         ))?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -340,8 +375,7 @@ where
     ) -> Result<Session, ClientError<T::Error>> {
         let response: LoginResponse =
             self.execute_typed(self.public.login_with_code(username, valid_code, region))?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -390,6 +424,17 @@ where
             .map_err(ClientError::Transport)?;
         Ok(parse_api_response(&response)?)
     }
+
+    pub fn execute_json_typed<R>(&self, request: RequestSpec) -> Result<R, ClientError<T::Error>>
+    where
+        R: for<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>, Error = JsonParseError>,
+    {
+        let response = self
+            .transport
+            .send(request)
+            .map_err(ClientError::Transport)?;
+        Ok(parse_json_response(&response)?)
+    }
 }
 
 // ---------- Client-backed authenticated scopes ----------
@@ -408,6 +453,12 @@ impl<'a, T> AsyncAuthenticatedClient<'a, T> {
 
     pub fn protocol(&self) -> &AuthenticatedProtocol {
         &self.client.auth
+    }
+
+    pub fn cloud_ble(&self) -> AsyncCloudBleClient<'a, T> {
+        AsyncCloudBleClient {
+            client: self.client,
+        }
     }
 
     pub fn feeder(
@@ -544,6 +595,70 @@ where
             }
         }
     }
+
+    pub async fn send_camera_rtm_command(
+        &self,
+        live_feed: &CameraLiveFeed,
+        command: CameraRtmCommand,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        let primary = self
+            .client
+            .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                CAMERA_RTM_PRIMARY_BASE_URL,
+                live_feed,
+                &command,
+            )?)
+            .await;
+        if let Ok(response) = &primary
+            && response.accepted_for(&command)
+        {
+            return primary;
+        }
+        let fallback = self
+            .client
+            .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                CAMERA_RTM_FALLBACK_BASE_URL,
+                live_feed,
+                &command,
+            )?)
+            .await;
+        match fallback {
+            Ok(response) if response.accepted_for(&command) => Ok(response),
+            Ok(response) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Ok(response),
+            },
+            Err(error) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Err(error),
+            },
+        }
+    }
+
+    pub async fn start_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+        is_sd: bool,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StartLive { is_sd })
+            .await
+    }
+
+    pub async fn stop_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StopLive)
+            .await
+    }
+
+    pub async fn send_camera_rtm_heartbeat(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::Heartbeat)
+            .await
+    }
 }
 
 #[cfg(feature = "blocking")]
@@ -560,6 +675,12 @@ impl<'a, T> BlockingAuthenticatedClient<'a, T> {
 
     pub fn protocol(&self) -> &AuthenticatedProtocol {
         &self.client.auth
+    }
+
+    pub fn cloud_ble(&self) -> BlockingCloudBleClient<'a, T> {
+        BlockingCloudBleClient {
+            client: self.client,
+        }
     }
 
     pub fn feeder(
@@ -692,6 +813,632 @@ where
             }
         }
     }
+
+    pub fn send_camera_rtm_command(
+        &self,
+        live_feed: &CameraLiveFeed,
+        command: CameraRtmCommand,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        let primary =
+            self.client
+                .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                    CAMERA_RTM_PRIMARY_BASE_URL,
+                    live_feed,
+                    &command,
+                )?);
+        if let Ok(response) = &primary
+            && response.accepted_for(&command)
+        {
+            return primary;
+        }
+        let fallback =
+            self.client
+                .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                    CAMERA_RTM_FALLBACK_BASE_URL,
+                    live_feed,
+                    &command,
+                )?);
+        match fallback {
+            Ok(response) if response.accepted_for(&command) => Ok(response),
+            Ok(response) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Ok(response),
+            },
+            Err(error) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Err(error),
+            },
+        }
+    }
+
+    pub fn start_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+        is_sd: bool,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StartLive { is_sd })
+    }
+
+    pub fn stop_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StopLive)
+    }
+
+    pub fn send_camera_rtm_heartbeat(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::Heartbeat)
+    }
+}
+
+#[cfg(feature = "async")]
+#[derive(Debug)]
+pub struct AsyncCloudBleClient<'a, T> {
+    client: &'a AsyncPetkitClient<T>,
+}
+
+#[cfg(feature = "async")]
+impl<T> AsyncCloudBleClient<'_, T> {
+    pub fn requests(&self) -> CloudBleScope {
+        self.client.auth.cloud_ble()
+    }
+
+    pub fn supported_devices_request(&self) -> RequestSpec {
+        self.requests().supported_devices()
+    }
+
+    pub fn supported_devices_for_group_request(&self, group_id: impl ToString) -> RequestSpec {
+        self.requests().supported_devices_for_group(group_id)
+    }
+
+    pub fn connect_request(&self, request: &CloudBleConnectRequest) -> RequestSpec {
+        self.requests().connect(request)
+    }
+
+    pub fn poll_request(&self, request: &CloudBlePollRequest) -> RequestSpec {
+        self.requests().poll(request)
+    }
+
+    pub fn control_device_request(&self, request: &CloudBleControlRequest) -> RequestSpec {
+        self.requests().control_device(request)
+    }
+}
+
+#[cfg(feature = "async")]
+impl<T> AsyncCloudBleClient<'_, T>
+where
+    T: AsyncTransport,
+{
+    pub async fn supported_devices(&self) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_request())
+            .await?;
+        Ok(response.into())
+    }
+
+    pub async fn supported_devices_for_group(
+        &self,
+        group_id: impl ToString,
+    ) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_for_group_request(group_id))
+            .await?;
+        Ok(response.into())
+    }
+
+    pub async fn connect(
+        &self,
+        request: &CloudBleConnectRequest,
+    ) -> Result<CloudBleConnection, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.connect_request(request))
+            .await
+    }
+
+    pub async fn poll(
+        &self,
+        request: &CloudBlePollRequest,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        self.client.execute_typed(self.poll_request(request)).await
+    }
+
+    pub async fn control_device(
+        &self,
+        request: &CloudBleControlRequest,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.control_device_request(request))
+            .await
+    }
+
+    pub async fn resolve_cloud_ble_metadata(
+        &self,
+        device: &DeviceSummary,
+    ) -> Result<Option<CloudBleMetadata>, ClientError<T::Error>> {
+        let summary_metadata = device.cloud_ble_metadata();
+        if summary_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(summary_metadata);
+        }
+        let detail_metadata = match self.client.authenticated().device_detail_for(device).await {
+            Ok(detail) => discovered_cloud_ble_metadata_for_summary(device, detail),
+            Err(_) => None,
+        };
+        let mut partial_metadata = merge_cloud_ble_metadata(summary_metadata, detail_metadata);
+        if partial_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(partial_metadata);
+        }
+        if partial_metadata.is_some() {
+            let relay_metadata = match self.supported_devices_for_group(device.group_id).await {
+                Ok(relays) => match_cloud_ble_metadata(device, &relays),
+                Err(_) => None,
+            };
+            partial_metadata = merge_cloud_ble_metadata(partial_metadata, relay_metadata);
+            return Ok(partial_metadata);
+        }
+        let relays = self.supported_devices_for_group(device.group_id).await?;
+        Ok(match_cloud_ble_metadata(device, &relays))
+    }
+
+    pub async fn execute_fountain(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn execute_fountain_with_settings(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn execute_fountain_with_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
+            .await
+    }
+
+    pub async fn execute_fountain_with_settings_and_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
+            .await
+    }
+
+    async fn execute_fountain_command(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        command: petkit_protocol::BleFrameCommand,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let device_id = device_id.to_string();
+        let connect = CloudBleConnectRequest::from_metadata(metadata, device_id.clone())?;
+        self.connect(&connect).await?;
+        let poll_state = self.poll_until_connected(&connect, options).await?;
+        if !matches!(poll_state, CloudBlePollState::Connected) {
+            return Err(PetkitError::InvalidResponse("cloud BLE relay did not connect").into());
+        }
+        let request = CloudBleControlRequest::from_metadata(
+            metadata,
+            device_id,
+            command.cmd.to_string(),
+            command.data,
+        );
+        self.control_device(&request).await
+    }
+
+    async fn poll_until_connected(
+        &self,
+        request: &CloudBlePollRequest,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        let max_polls = options.max_polls.max(1);
+        let mut last_state = CloudBlePollState::NotConnected;
+        for poll_index in 0..max_polls {
+            last_state = self.poll(request).await?;
+            if matches!(
+                last_state,
+                CloudBlePollState::Connected | CloudBlePollState::Failed
+            ) {
+                break;
+            }
+            if poll_index + 1 < max_polls && !options.poll_interval.is_zero() {
+                futures_timer::Delay::new(options.poll_interval).await;
+            }
+        }
+        Ok(last_state)
+    }
+}
+
+#[cfg(feature = "blocking")]
+#[derive(Debug)]
+pub struct BlockingCloudBleClient<'a, T> {
+    client: &'a BlockingPetkitClient<T>,
+}
+
+#[cfg(feature = "blocking")]
+impl<T> BlockingCloudBleClient<'_, T> {
+    pub fn requests(&self) -> CloudBleScope {
+        self.client.auth.cloud_ble()
+    }
+
+    pub fn supported_devices_request(&self) -> RequestSpec {
+        self.requests().supported_devices()
+    }
+
+    pub fn supported_devices_for_group_request(&self, group_id: impl ToString) -> RequestSpec {
+        self.requests().supported_devices_for_group(group_id)
+    }
+
+    pub fn connect_request(&self, request: &CloudBleConnectRequest) -> RequestSpec {
+        self.requests().connect(request)
+    }
+
+    pub fn poll_request(&self, request: &CloudBlePollRequest) -> RequestSpec {
+        self.requests().poll(request)
+    }
+
+    pub fn control_device_request(&self, request: &CloudBleControlRequest) -> RequestSpec {
+        self.requests().control_device(request)
+    }
+}
+
+#[cfg(feature = "blocking")]
+impl<T> BlockingCloudBleClient<'_, T>
+where
+    T: BlockingTransport,
+{
+    pub fn supported_devices(&self) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_request())?;
+        Ok(response.into())
+    }
+
+    pub fn supported_devices_for_group(
+        &self,
+        group_id: impl ToString,
+    ) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_for_group_request(group_id))?;
+        Ok(response.into())
+    }
+
+    pub fn connect(
+        &self,
+        request: &CloudBleConnectRequest,
+    ) -> Result<CloudBleConnection, ClientError<T::Error>> {
+        self.client.execute_typed(self.connect_request(request))
+    }
+
+    pub fn poll(
+        &self,
+        request: &CloudBlePollRequest,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        self.client.execute_typed(self.poll_request(request))
+    }
+
+    pub fn control_device(
+        &self,
+        request: &CloudBleControlRequest,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.control_device_request(request))
+    }
+
+    pub fn resolve_cloud_ble_metadata(
+        &self,
+        device: &DeviceSummary,
+    ) -> Result<Option<CloudBleMetadata>, ClientError<T::Error>> {
+        let summary_metadata = device.cloud_ble_metadata();
+        if summary_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(summary_metadata);
+        }
+        let detail_metadata = match self.client.authenticated().device_detail_for(device) {
+            Ok(detail) => discovered_cloud_ble_metadata_for_summary(device, detail),
+            Err(_) => None,
+        };
+        let mut partial_metadata = merge_cloud_ble_metadata(summary_metadata, detail_metadata);
+        if partial_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(partial_metadata);
+        }
+        if partial_metadata.is_some() {
+            let relay_metadata = match self.supported_devices_for_group(device.group_id) {
+                Ok(relays) => match_cloud_ble_metadata(device, &relays),
+                Err(_) => None,
+            };
+            partial_metadata = merge_cloud_ble_metadata(partial_metadata, relay_metadata);
+            return Ok(partial_metadata);
+        }
+        let relays = self.supported_devices_for_group(device.group_id)?;
+        Ok(match_cloud_ble_metadata(device, &relays))
+    }
+
+    pub fn execute_fountain(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+    }
+
+    pub fn execute_fountain_with_settings(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+    }
+
+    pub fn execute_fountain_with_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
+    }
+
+    pub fn execute_fountain_with_settings_and_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
+    }
+
+    fn execute_fountain_command(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        command: petkit_protocol::BleFrameCommand,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let device_id = device_id.to_string();
+        let connect = CloudBleConnectRequest::from_metadata(metadata, device_id.clone())?;
+        self.connect(&connect)?;
+        let poll_state = self.poll_until_connected(&connect, options)?;
+        if !matches!(poll_state, CloudBlePollState::Connected) {
+            return Err(PetkitError::InvalidResponse("cloud BLE relay did not connect").into());
+        }
+        let request = CloudBleControlRequest::from_metadata(
+            metadata,
+            device_id,
+            command.cmd.to_string(),
+            command.data,
+        );
+        self.control_device(&request)
+    }
+
+    fn poll_until_connected(
+        &self,
+        request: &CloudBlePollRequest,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        let max_polls = options.max_polls.max(1);
+        let mut last_state = CloudBlePollState::NotConnected;
+        for poll_index in 0..max_polls {
+            last_state = self.poll(request)?;
+            if matches!(
+                last_state,
+                CloudBlePollState::Connected | CloudBlePollState::Failed
+            ) {
+                break;
+            }
+            if poll_index + 1 < max_polls && !options.poll_interval.is_zero() {
+                std::thread::sleep(options.poll_interval);
+            }
+        }
+        Ok(last_state)
+    }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn discovered_cloud_ble_metadata_for_summary(
+    device: &DeviceSummary,
+    detail: DiscoveredDeviceDetail,
+) -> Option<CloudBleMetadata> {
+    let detail = match detail {
+        DiscoveredDeviceDetail::Feeder(response)
+        | DiscoveredDeviceDetail::Litter(response)
+        | DiscoveredDeviceDetail::Fountain(response)
+        | DiscoveredDeviceDetail::Purifier(response) => response,
+    };
+    let mac = non_empty_string(detail.mac.clone())?;
+    let device_type = device.device_type_id.or(device.type_code).map_or_else(
+        || {
+            non_empty_string(detail.device_type.clone())
+                .unwrap_or_else(|| device.device_type.as_str().to_string())
+        },
+        |value| value.to_string(),
+    );
+    Some(CloudBleMetadata {
+        device_type,
+        mac,
+        group_id: detail
+            .group_id
+            .map(|group_id| group_id.to_string())
+            .or_else(|| Some(device.group_id.to_string())),
+        ble_id: non_empty_string(detail.ble_id.clone())
+            .or_else(|| non_empty_string(device.ble_id.clone())),
+    })
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn non_empty_string(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn cloud_ble_metadata_has_ble_id(metadata: &CloudBleMetadata) -> bool {
+    metadata
+        .ble_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn merge_cloud_ble_metadata(
+    primary: Option<CloudBleMetadata>,
+    fallback: Option<CloudBleMetadata>,
+) -> Option<CloudBleMetadata> {
+    let Some(mut primary) = primary else {
+        return fallback;
+    };
+    let Some(fallback) = fallback else {
+        return Some(primary);
+    };
+    if !cloud_ble_metadata_has_ble_id(&primary) {
+        primary.ble_id = fallback.ble_id;
+    }
+    if primary
+        .group_id
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        primary.group_id = fallback.group_id;
+    }
+    Some(primary)
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn match_cloud_ble_metadata(
+    device: &DeviceSummary,
+    relays: &[CloudBleDevice],
+) -> Option<CloudBleMetadata> {
+    let relay = relays
+        .iter()
+        .find(|relay| cloud_ble_relay_matches_identity(device, relay))
+        .or_else(|| {
+            let matches = relays
+                .iter()
+                .filter(|relay| cloud_ble_relay_matches_type(device, relay))
+                .collect::<Vec<_>>();
+            (matches.len() == 1)
+                .then(|| matches.first().copied())
+                .flatten()
+        })?;
+    Some(CloudBleMetadata {
+        device_type: relay
+            .type_id
+            .or(device.device_type_id)
+            .or(device.type_code)
+            .map_or_else(
+                || device.device_type.as_str().to_string(),
+                |value| value.to_string(),
+            ),
+        mac: relay.mac.clone(),
+        group_id: Some(device.group_id.to_string()),
+        ble_id: device.ble_id.clone().or_else(|| Some(relay.id.clone())),
+    })
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn cloud_ble_relay_matches_identity(device: &DeviceSummary, relay: &CloudBleDevice) -> bool {
+    let device_id = device.device_id.to_string();
+    device.ble_id.as_deref() == Some(relay.id.as_str())
+        || device_id == relay.id
+        || device.unique_id == relay.id
+        || device
+            .device_name
+            .as_deref()
+            .zip(relay.name.as_deref())
+            .is_some_and(|(left, right)| left.trim().eq_ignore_ascii_case(right.trim()))
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn cloud_ble_relay_matches_type(device: &DeviceSummary, relay: &CloudBleDevice) -> bool {
+    relay.type_id.is_some_and(|type_id| {
+        device.device_type_id == Some(type_id) || device.type_code == Some(type_id)
+    })
 }
 
 #[cfg(feature = "async")]
@@ -946,6 +1693,10 @@ where
         self.client.execute_typed(self.start_live_request()).await
     }
 
+    pub async fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live().await
+    }
+
     pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.cloud_video_request()).await
     }
@@ -1186,6 +1937,10 @@ where
         self.client.execute_typed(self.start_live_request())
     }
 
+    pub fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live()
+    }
+
     pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.cloud_video_request())
     }
@@ -1329,6 +2084,10 @@ where
         self.client.execute_typed(self.start_live_request()).await
     }
 
+    pub async fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live().await
+    }
+
     pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.cloud_video_request()).await
     }
@@ -1462,6 +2221,10 @@ where
 
     pub fn start_live(&self) -> Result<LitterStartLiveResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.start_live_request())
+    }
+
+    pub fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live()
     }
 
     pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
@@ -2057,6 +2820,7 @@ pub mod reqwest_async {
                 headers,
                 query,
                 form_fields,
+                body,
             } = request;
 
             async move {
@@ -2070,7 +2834,11 @@ pub mod reqwest_async {
                     builder = builder.query(&query_pairs);
                 }
 
-                if !form_fields.is_empty() {
+                if let Some(body) = body {
+                    builder = builder
+                        .header("Content-Type", body.content_type.as_ref())
+                        .body(body.body);
+                } else if !form_fields.is_empty() {
                     let form_pairs = form_fields
                         .iter()
                         .map(|field| (field.name.as_ref(), field.value.as_str()))
@@ -2132,6 +2900,7 @@ pub mod reqwest_blocking {
                 headers,
                 query,
                 form_fields,
+                body,
             } = request;
             let mut builder = self.client.request(request_method(method), url);
 
@@ -2143,7 +2912,11 @@ pub mod reqwest_blocking {
                 builder = builder.query(&query_pairs);
             }
 
-            if !form_fields.is_empty() {
+            if let Some(body) = body {
+                builder = builder
+                    .header("Content-Type", body.content_type.as_ref())
+                    .body(body.body);
+            } else if !form_fields.is_empty() {
                 let form_pairs = form_fields
                     .iter()
                     .map(|field| (field.name.as_ref(), field.value.as_str()))
@@ -2245,6 +3018,7 @@ pub mod ureq_blocking {
                 headers,
                 query,
                 form_fields,
+                body,
             } = request;
 
             let mut builder = match method {
@@ -2262,7 +3036,11 @@ pub mod ureq_blocking {
             let response = match method {
                 HttpMethod::Get => builder.call(),
                 HttpMethod::Post => {
-                    if form_fields.is_empty() {
+                    if let Some(body) = body {
+                        builder
+                            .set("Content-Type", body.content_type.as_ref())
+                            .send_string(&body.body)
+                    } else if form_fields.is_empty() {
                         builder.send_string("")
                     } else {
                         let pairs = form_fields
@@ -2305,9 +3083,13 @@ mod tests {
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::cell::RefCell;
     #[cfg(feature = "async")]
+    use std::collections::VecDeque;
+    #[cfg(feature = "async")]
     use std::future::{Future, ready};
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::rc::Rc;
+    #[cfg(feature = "async")]
+    use std::time::{Duration, Instant};
 
     #[cfg(feature = "async")]
     use futures::executor::block_on;
@@ -2319,21 +3101,27 @@ mod tests {
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
     use petkit_types::{
-        ClientContext, ClientProfile, DeviceId, DeviceSummary, DeviceType, FountainAction,
+        ClientContext, ClientProfile, CloudBleDevice, CloudBleMetadata, CloudBleRelayOptions,
+        DeviceDetailResponse, DeviceId, DeviceSummary, DeviceType, FountainAction,
         FountainDeviceType,
     };
 
+    #[cfg(feature = "async")]
+    use super::FountainBleClient;
     #[cfg(feature = "blocking")]
     use super::FountainBleSettings;
     #[cfg(feature = "blocking")]
     use super::blocking_host_callback::BlockingHostCallbackTransport;
-    use super::hash_password_md5;
     #[cfg(feature = "async")]
     use super::host_callback::HostCallbackTransport;
     #[cfg(feature = "async")]
     use super::{AsyncPetkitClient, AsyncTransport, DiscoveredDeviceDetail};
     #[cfg(feature = "blocking")]
     use super::{BlockingPetkitClient, BlockingTransport};
+    use super::{
+        discovered_cloud_ble_metadata_for_summary, hash_password_md5, match_cloud_ble_metadata,
+        merge_cloud_ble_metadata,
+    };
     #[cfg(feature = "blocking")]
     use secrecy::ExposeSecret;
 
@@ -2377,6 +3165,35 @@ mod tests {
                 .expect("request mutex should not be poisoned")
                 .replace(request);
             ready(Ok(self.response.clone()))
+        }
+    }
+
+    #[cfg(feature = "async")]
+    #[derive(Debug)]
+    struct SequenceAsyncTransport {
+        paths: Mutex<Vec<String>>,
+        responses: Mutex<VecDeque<ResponseParts>>,
+    }
+
+    #[cfg(feature = "async")]
+    impl AsyncTransport for SequenceAsyncTransport {
+        type Error = std::convert::Infallible;
+
+        fn send(
+            &self,
+            request: RequestSpec,
+        ) -> impl Future<Output = Result<ResponseParts, Self::Error>> {
+            self.paths
+                .lock()
+                .expect("paths mutex should not be poisoned")
+                .push(request.path);
+            let response = self
+                .responses
+                .lock()
+                .expect("responses mutex should not be poisoned")
+                .pop_front()
+                .expect("test response should exist");
+            ready(Ok(response))
         }
     }
 
@@ -2486,7 +3303,7 @@ mod tests {
             response: ResponseParts::new(
                 200,
                 vec![],
-                br#"{"result":{"session":{"id":"s1","userId":"u1","expiresIn":3600,"region":"de","createdAt":"2026-05-27T00:00:00.000+0000","refreshedAt":null}}}"#.to_vec(),
+                br#"{"result":{"apiServers":["https://api.petkt.com/6/"],"session":{"id":"s1","userId":"u1","expiresIn":3600,"region":"de","createdAt":"2026-05-27T00:00:00.000+0000","refreshedAt":null}}}"#.to_vec(),
             ),
         };
         let mut client = BlockingPetkitClient::new(ctx(), regional(), transport);
@@ -2506,6 +3323,10 @@ mod tests {
         assert_eq!(request.path, "user/login");
         // After login, the session id is persisted on the client.
         assert_eq!(client.authenticated().session_id(), "s1");
+        assert_eq!(
+            client.authenticated().protocol().family_list().url,
+            "https://api.petkt.com/6/group/family/list"
+        );
     }
 
     #[cfg(feature = "blocking")]
@@ -2790,6 +3611,8 @@ mod tests {
             device_name: Some(String::from("feeder")),
             device_type: DeviceType::D4s,
             group_id: 1,
+            mac: None,
+            ble_id: None,
             device_type_id: Some(10),
             type_code: Some(20),
             unique_id: String::from("u-42"),
@@ -2807,6 +3630,268 @@ mod tests {
             .clone()
             .expect("detail request should be captured");
         assert_eq!(request.path, "d4s/device_detail");
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_cloud_ble_poll_honors_interval_between_connecting_polls() {
+        let poll_interval = Duration::from_millis(10);
+        let transport = SequenceAsyncTransport {
+            paths: Mutex::new(Vec::new()),
+            responses: Mutex::new(VecDeque::from([
+                ResponseParts::new(200, vec![], br#"{"result":true}"#.to_vec()),
+                ResponseParts::new(200, vec![], br#"{"result":{"state":0}}"#.to_vec()),
+                ResponseParts::new(200, vec![], br#"{"result":{"state":1}}"#.to_vec()),
+                ResponseParts::new(200, vec![], br#"{"result":true}"#.to_vec()),
+            ])),
+        };
+        let client = AsyncPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let metadata = CloudBleMetadata {
+            device_type: String::from("ctw3"),
+            mac: String::from("aa:bb"),
+            group_id: Some(String::from("7")),
+            ble_id: Some(String::from("ble-42")),
+        };
+
+        let started = Instant::now();
+        let response = block_on(
+            client
+                .authenticated()
+                .cloud_ble()
+                .execute_fountain_with_options(
+                    "42",
+                    &metadata,
+                    FountainBleClient::new(FountainDeviceType::Ctw3),
+                    FountainAction::PowerOff,
+                    1,
+                    CloudBleRelayOptions::new(poll_interval, 3),
+                ),
+        )
+        .expect("fountain cloud BLE command should execute");
+
+        assert!(response.accepted);
+        assert!(
+            started.elapsed() >= Duration::from_millis(5),
+            "async Cloud BLE retry loop should wait between Connecting polls"
+        );
+        assert_eq!(
+            client
+                .transport
+                .paths
+                .lock()
+                .expect("paths mutex should not be poisoned")
+                .as_slice(),
+            ["ble/connect", "ble/poll", "ble/poll", "ble/controlDevice"]
+        );
+    }
+
+    #[test]
+    fn cloud_ble_metadata_can_be_matched_from_relay_type() {
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::W5,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("w5-42"),
+        };
+        let relays = [CloudBleDevice {
+            id: String::from("ble-42"),
+            mac: String::from("aa:bb"),
+            name: Some(String::from("relay")),
+            sn: None,
+            pim: None,
+            type_id: Some(14),
+            low_version: None,
+        }];
+
+        let metadata =
+            match_cloud_ble_metadata(&summary, &relays).expect("relay should match summary");
+
+        assert_eq!(metadata.device_type, "14");
+        assert_eq!(metadata.mac, "aa:bb");
+        assert_eq!(metadata.group_id.as_deref(), Some("7"));
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_match_does_not_panic_without_relay_candidates() {
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::W5,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("w5-42"),
+        };
+
+        assert!(match_cloud_ble_metadata(&summary, &[]).is_none());
+    }
+
+    #[test]
+    fn cloud_ble_metadata_ignores_unrelated_single_relay_candidate() {
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-42"),
+        };
+        let relays = [CloudBleDevice {
+            id: String::from("camera-relay"),
+            mac: String::from("aa:bb"),
+            name: Some(String::from("camera")),
+            sn: None,
+            pim: None,
+            type_id: Some(99),
+            low_version: None,
+        }];
+
+        assert!(match_cloud_ble_metadata(&summary, &relays).is_none());
+    }
+
+    #[test]
+    fn cloud_ble_metadata_can_be_resolved_from_fountain_detail_mac() {
+        let summary = DeviceSummary {
+            device_id: 1_000_024_016,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-1000024016"),
+        };
+        let detail = DiscoveredDeviceDetail::Fountain(DeviceDetailResponse {
+            id: Some(1_000_024_016),
+            name: Some(String::from("fountain")),
+            device_type: None,
+            group_id: None,
+            mac: Some(String::from("aa:bb:cc:dd:ee:ff")),
+            ble_id: Some(String::from("ble-ctw3")),
+            sn: None,
+            firmware: None,
+            settings: None,
+            state: None,
+        });
+
+        let metadata = discovered_cloud_ble_metadata_for_summary(&summary, detail)
+            .expect("detail mac should complete cloud BLE metadata");
+
+        assert_eq!(metadata.device_type, "14");
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.group_id.as_deref(), Some("7"));
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_merges_relay_ble_id_into_partial_metadata() {
+        let primary = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("aa:bb:cc:dd:ee:ff"),
+            group_id: Some(String::from("7")),
+            ble_id: None,
+        };
+        let relay = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("11:22:33:44:55:66"),
+            group_id: Some(String::from("7")),
+            ble_id: Some(String::from("ble-ctw3")),
+        };
+
+        let metadata = merge_cloud_ble_metadata(Some(primary), Some(relay))
+            .expect("partial metadata should remain available");
+
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_keeps_summary_mac_when_detail_fills_ble_id() {
+        let summary = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("aa:bb:cc:dd:ee:ff"),
+            group_id: Some(String::from("7")),
+            ble_id: None,
+        };
+        let detail = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("11:22:33:44:55:66"),
+            group_id: Some(String::from("7")),
+            ble_id: Some(String::from("detail-ble")),
+        };
+
+        let metadata = merge_cloud_ble_metadata(Some(summary), Some(detail))
+            .expect("summary metadata should remain available");
+
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.ble_id.as_deref(), Some("detail-ble"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_keeps_partial_metadata_without_relay_match() {
+        let primary = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("aa:bb:cc:dd:ee:ff"),
+            group_id: Some(String::from("7")),
+            ble_id: None,
+        };
+
+        let metadata = merge_cloud_ble_metadata(Some(primary), None)
+            .expect("partial metadata should remain available");
+
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.ble_id, None);
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_cloud_ble_metadata_prefers_summary_mac_without_lookup() {
+        let transport = MockBlockingTransport {
+            last_request: Mutex::new(None),
+            response: ResponseParts::new(200, vec![], br#"{"result":[]}"#.to_vec()),
+        };
+        let client = BlockingPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: Some(String::from("aa:bb")),
+            ble_id: Some(String::from("ble-42")),
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-42"),
+        };
+
+        let metadata = client
+            .authenticated()
+            .cloud_ble()
+            .resolve_cloud_ble_metadata(&summary)
+            .expect("summary metadata should resolve")
+            .expect("summary mac should produce metadata");
+
+        assert_eq!(metadata.mac, "aa:bb");
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
+        assert!(
+            client
+                .transport
+                .last_request
+                .lock()
+                .expect("request mutex should not be poisoned")
+                .is_none()
+        );
     }
 
     #[cfg(feature = "async")]

@@ -3,7 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use hmac::{Hmac, Mac};
-use nojson::{JsonParseError, RawJsonValue};
+use nojson::{JsonParseError, JsonValueKind, RawJsonValue};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -297,6 +297,8 @@ pub struct DeviceSummary {
     pub device_name: Option<String>,
     pub device_type: DeviceType,
     pub group_id: u64,
+    pub mac: Option<String>,
+    pub ble_id: Option<String>,
     pub device_type_id: Option<u64>,
     pub type_code: Option<u64>,
     pub unique_id: String,
@@ -311,6 +313,25 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for DeviceSummary {
             device_name: optional_member(value.to_member("deviceName")?)?,
             device_type: value.to_member("deviceType")?.required()?.try_into()?,
             group_id: value.to_member("groupId")?.required()?.try_into()?,
+            mac: optional_string_any(
+                value,
+                &[
+                    "mac",
+                    "btMac",
+                    "bt_mac",
+                    "deviceMac",
+                    "bleMac",
+                    "ble_mac",
+                    "bluetoothMac",
+                    "bluetooth_mac",
+                    "macAddress",
+                    "mac_address",
+                ],
+            )?,
+            ble_id: optional_string_any(
+                value,
+                &["bleId", "ble_id", "bleDeviceId", "ble_device_id"],
+            )?,
             device_type_id: optional_member(value.to_member("type")?)?,
             type_code: optional_member(value.to_member("typeCode")?)?,
             unique_id: value.to_member("uniqueId")?.required()?.try_into()?,
@@ -368,6 +389,35 @@ where
         Some(value) if value.kind() == nojson::JsonValueKind::Null => Ok(None),
         Some(value) => T::try_from(value).map(Some),
         None => Ok(None),
+    }
+}
+
+fn optional_string_any(
+    value: RawJsonValue<'_, '_>,
+    keys: &[&'static str],
+) -> Result<Option<String>, JsonParseError> {
+    for key in keys {
+        match value.to_member(key)?.optional() {
+            Some(value) if value.kind() == JsonValueKind::Null => {}
+            Some(value) => return scalar_to_string(value).map(Some),
+            None => {}
+        }
+    }
+    Ok(None)
+}
+
+fn scalar_to_string(value: RawJsonValue<'_, '_>) -> Result<String, JsonParseError> {
+    match value.kind() {
+        JsonValueKind::String => String::try_from(value),
+        JsonValueKind::Integer | JsonValueKind::Float => Ok(String::from(value.as_number_str()?)),
+        JsonValueKind::Boolean => Ok(if bool::try_from(value)? {
+            String::from("true")
+        } else {
+            String::from("false")
+        }),
+        JsonValueKind::Array | JsonValueKind::Object | JsonValueKind::Null => {
+            Err(value.invalid("expected scalar string-compatible value"))
+        }
     }
 }
 

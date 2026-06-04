@@ -8,8 +8,8 @@ use nojson::{JsonValueKind, RawJsonOwned};
 use petkit_protocol::BaseUrl;
 use petkit_types::{
     AccountGroup, ClientContext, ClientProfile, DeviceDetailResponse, DeviceId, DeviceSummary,
-    DeviceType, FeederDeviceType, LitterDeviceType, PetkitError, PurifierDeviceType,
-    RegionServersPayload,
+    DeviceType, FeederDeviceType, FountainDeviceType, LitterDeviceType, PetkitError,
+    PurifierDeviceType, RegionServersPayload, flatten_devices,
 };
 
 #[derive(Clone, Debug)]
@@ -27,6 +27,13 @@ pub(crate) fn password() -> String {
     env_or("PETKIT_PASSWORD", "password")
 }
 
+pub(crate) fn login_code() -> Option<String> {
+    env::var("PETKIT_LOGIN_CODE")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
 pub(crate) fn region() -> String {
     env_or("PETKIT_REGION", "DE")
 }
@@ -41,6 +48,12 @@ pub(crate) fn example_context() -> ClientContext {
 
 pub(crate) fn default_regional_base() -> BaseUrl {
     BaseUrl::Regional(env_or("PETKIT_BASE_URL", "https://api.petkt.com/latest/"))
+}
+
+pub(crate) fn env_flag(key: &str) -> bool {
+    env::var(key)
+        .map(|value| matches!(value.trim(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
 }
 
 pub(crate) fn resolve_regional_base(regions: &RegionServersPayload, region: &str) -> BaseUrl {
@@ -76,6 +89,18 @@ pub(crate) fn select_litter_device(
     )
 }
 
+pub(crate) fn select_fountain_device(
+    groups: &[AccountGroup],
+) -> Result<SelectedDevice<FountainDeviceType>, io::Error> {
+    select_device::<FountainDeviceType>(
+        groups,
+        "fountain",
+        "PETKIT_FOUNTAIN_DEVICE_ID",
+        "PETKIT_FOUNTAIN_DEVICE_TYPE",
+        "PETKIT_FOUNTAIN_DEVICE_NAME",
+    )
+}
+
 pub(crate) fn select_purifier_device(
     groups: &[AccountGroup],
 ) -> Result<SelectedDevice<PurifierDeviceType>, io::Error> {
@@ -86,6 +111,34 @@ pub(crate) fn select_purifier_device(
         "PETKIT_PURIFIER_DEVICE_TYPE",
         "PETKIT_PURIFIER_DEVICE_NAME",
     )
+}
+
+pub(crate) fn select_camera_device(groups: &[AccountGroup]) -> Result<DeviceSummary, io::Error> {
+    let requested_id = env_device_id("PETKIT_CAMERA_DEVICE_ID")?;
+    let requested_name = env::var("PETKIT_CAMERA_DEVICE_NAME").ok();
+
+    for device in flatten_devices(groups) {
+        if !device.device_type.supports_camera() {
+            continue;
+        }
+        let Ok(device_id) = DeviceId::new(device.device_id) else {
+            continue;
+        };
+        if requested_id.is_some_and(|requested_id| device_id != requested_id) {
+            continue;
+        }
+        if requested_name
+            .as_deref()
+            .is_some_and(|requested_name| !same_name(requested_name, &display_device_name(&device)))
+        {
+            continue;
+        }
+        return Ok(device);
+    }
+
+    Err(io::Error::other(
+        "no camera-capable device found; set PETKIT_CAMERA_DEVICE_ID to target one explicitly",
+    ))
 }
 
 pub(crate) fn print_device_detail(
@@ -210,6 +263,10 @@ fn display_device_name(device: &DeviceSummary) -> String {
         .device_name
         .clone()
         .unwrap_or_else(|| device.unique_id.clone())
+}
+
+fn same_name(left: &str, right: &str) -> bool {
+    left.trim().eq_ignore_ascii_case(right.trim())
 }
 
 fn render_raw_json(value: &RawJsonOwned) -> String {

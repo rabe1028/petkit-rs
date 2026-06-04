@@ -4,7 +4,7 @@ use petkit_types::{DeviceId, FountainDeviceType, FountainSetting, to_kv_string};
 
 use crate::{HttpMethod, RequestSpec};
 
-use super::{AuthCore, DEVICE_DETAIL_ENDPOINT, UPDATE_SETTING_ENDPOINT};
+use super::{AuthCore, DEVICE_DATA_ENDPOINT, UPDATE_SETTING_ENDPOINT};
 
 // ---------- fountain scope ----------
 
@@ -31,7 +31,7 @@ impl FountainScope {
 
     /// Read the broad device detail payload, including `settings` and `state`.
     pub fn device_detail(&self) -> RequestSpec {
-        self.request(DEVICE_DETAIL_ENDPOINT)
+        self.request(DEVICE_DATA_ENDPOINT)
             .push_form_field("id", self.device_id.to_string())
     }
 

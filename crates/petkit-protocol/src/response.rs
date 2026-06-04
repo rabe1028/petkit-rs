@@ -46,6 +46,21 @@ where
     T::try_from(result).map_err(|error| PetkitError::Decode(error.to_string()))
 }
 
+pub fn parse_json_response<T>(response: &ResponseParts) -> Result<T, PetkitError>
+where
+    T: for<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>, Error = JsonParseError>,
+{
+    if !(200..300).contains(&response.status) {
+        return Err(PetkitError::HttpStatus {
+            status: response.status,
+        });
+    }
+    let body =
+        str::from_utf8(&response.body).map_err(|error| PetkitError::Decode(error.to_string()))?;
+    let raw = RawJson::parse(body).map_err(|error| PetkitError::Decode(error.to_string()))?;
+    T::try_from(raw.value()).map_err(|error| PetkitError::Decode(error.to_string()))
+}
+
 pub fn parse_text_response(response: ResponseParts) -> Result<String, PetkitError> {
     if !(200..=299).contains(&response.status) {
         return Err(PetkitError::HttpStatus {

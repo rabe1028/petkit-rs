@@ -16,32 +16,38 @@ pub use ble::{
     write_fountain_ble_frame_with_settings,
 };
 pub use protocol::{
-    AuthenticatedProtocol, D3Feeder, D4Feeder, D4hFeeder, D4sFeeder, D4shFeeder,
-    DualHopperFeederModel, DualManualFeedAmount, DynamicFeeder, DynamicLitter, FeederMiniFeeder,
-    FeederModel, FeederScope, FeederSupportsCalibration, FeederSupportsCallPet,
-    FeederSupportsCamera, FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope,
-    FreshElementFeeder, LitterModel, LitterScope, LitterSupportsCamera,
-    LitterSupportsN50Deodorizer, ManualFeedAmount, PetScope, PublicProtocol, PurifierScope,
-    SingleHopperFeederModel, SingleManualFeedAmount, T3Litter, T4Litter, T5Litter, T6Litter,
-    T7Litter,
+    AuthenticatedProtocol, CAMERA_RTM_FALLBACK_BASE_URL, CAMERA_RTM_PRIMARY_BASE_URL,
+    CloudBleScope, D3Feeder, D4Feeder, D4hFeeder, D4sFeeder, D4shFeeder, DualHopperFeederModel,
+    DualManualFeedAmount, DynamicFeeder, DynamicLitter, FeederMiniFeeder, FeederModel, FeederScope,
+    FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
+    FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope, FreshElementFeeder,
+    LitterModel, LitterScope, LitterSupportsCamera, LitterSupportsN50Deodorizer, ManualFeedAmount,
+    PetScope, PublicProtocol, PurifierScope, SingleHopperFeederModel, SingleManualFeedAmount,
+    T3Litter, T4Litter, T5Litter, T6Litter, T7Litter, camera_rtm_peer_message,
+    camera_rtm_peer_message_for_base,
 };
 pub use request::{
-    BaseUrl, FormField, Header, HttpMethod, QueryField, RequestSpec, ResponseParts, session_headers,
+    BaseUrl, FormField, Header, HttpMethod, QueryField, RequestBody, RequestSpec, ResponseParts,
+    session_headers,
 };
-pub use response::{parse_api_response, parse_text_response};
+pub use response::{parse_api_response, parse_json_response, parse_text_response};
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use alloc::string::String;
+
     use petkit_types::{
-        ClientContext, ClientProfile, DeviceDetailResponse, DeviceId, FeederDeviceType, PetkitDay,
-        PetkitError, PetkitErrorCode, PurifierDeviceType,
+        CameraLiveFeed, CameraRtmCommand, ClientContext, ClientProfile, CloudBleConnectRequest,
+        CloudBleControlRequest, DeviceDetailResponse, DeviceId, FeederDeviceType, PetkitDay,
+        PetkitError, PetkitErrorCode, PtzDirection, PtzKind, PurifierDeviceType,
     };
 
     use super::{
-        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, DualManualFeedAmount,
-        FeederMiniFeeder, FountainBleClient, FountainBleSettings, PublicProtocol, ResponseParts,
-        SingleManualFeedAmount, build_ble_frame, build_fountain_ble_command, parse_api_response,
+        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, D4shFeeder, DualManualFeedAmount,
+        FeederMiniFeeder, FountainBleClient, FountainBleSettings, HttpMethod, PublicProtocol,
+        ResponseParts, SingleManualFeedAmount, T6Litter, build_ble_frame,
+        build_fountain_ble_command, camera_rtm_peer_message, parse_api_response,
         parse_text_response, write_fountain_ble_frame,
     };
 
@@ -218,6 +224,136 @@ mod tests {
     }
 
     #[test]
+    fn cloud_ble_requests_use_relay_endpoints_and_form_fields() {
+        let connect = CloudBleConnectRequest::new("42", "W5", "aa:bb").with_group_id("7");
+        let request = authenticated().cloud_ble().connect(&connect);
+        assert_eq!(request.path, "ble/connect");
+        assert!(
+            request
+                .form_fields
+                .iter()
+                .any(|f| f.name == "bleId" && f.value == "42")
+        );
+        assert!(
+            request
+                .form_fields
+                .iter()
+                .any(|f| f.name == "type" && f.value == "W5")
+        );
+        assert!(
+            request
+                .form_fields
+                .iter()
+                .any(|f| f.name == "mac" && f.value == "aa:bb")
+        );
+        assert!(
+            request
+                .form_fields
+                .iter()
+                .any(|f| f.name == "groupId" && f.value == "7")
+        );
+
+        let control = CloudBleControlRequest::new("42", "W5", "aa:bb", "220", "encoded");
+        let request = authenticated().cloud_ble().control_device(&control);
+        assert_eq!(request.path, "ble/controlDevice");
+        assert!(
+            request
+                .form_fields
+                .iter()
+                .any(|f| f.name == "cmd" && f.value == "220")
+        );
+        assert!(
+            request
+                .form_fields
+                .iter()
+                .any(|f| f.name == "data" && f.value == "encoded")
+        );
+    }
+
+    #[test]
+    fn camera_rtm_peer_message_builds_agora_json_request() {
+        let live_feed = CameraLiveFeed {
+            accepted: true,
+            whep_url: None,
+            app_id: Some(String::from("app-id")),
+            channel_id: Some(String::from("channel")),
+            rtc_token: Some(String::from("rtc")),
+            rtm_token: Some(String::from("rtm")),
+            uid: Some(1001),
+            app_rtm_user_id: Some(String::from("app_1001")),
+            dev_rtm_user_id: Some(String::from("dev_2001")),
+        };
+        let request = camera_rtm_peer_message(
+            &live_feed,
+            &CameraRtmCommand::PtzControl {
+                kind: PtzKind::Move,
+                direction: PtzDirection::Left,
+            },
+        )
+        .expect("rtm request should build");
+        assert!(
+            request
+                .url
+                .contains("/dev/v2/project/app-id/rtm/users/app_1001/peer_messages")
+        );
+        assert!(request.url.contains("wait_for_ack=true"));
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|header| header.name == "x-agora-token" && header.value.as_str() == "rtm")
+        );
+        assert!(
+            request.headers.iter().any(|header| {
+                header.name == "x-agora-uid" && header.value.as_str() == "app_1001"
+            })
+        );
+        assert!(request.headers.iter().any(|header| {
+            header.name == "Authorization" && header.value.as_str() == "agora token=rtm"
+        }));
+        let body = request.body.expect("json body should exist").body;
+        assert!(body.contains(r#""destination":"dev_2001""#));
+        assert!(body.contains(r#""cmd\":\"ptz_ctrl\""#));
+    }
+
+    #[test]
+    fn camera_start_live_uses_get_query_parameters() {
+        use petkit_types::LitterDeviceType;
+
+        let feeder = authenticated()
+            .feeder(FeederDeviceType::D4sh, device_id(42))
+            .with_model::<D4shFeeder>()
+            .start_live();
+        assert_eq!(feeder.method, HttpMethod::Get);
+        assert_eq!(feeder.form_fields, []);
+        assert!(
+            feeder
+                .query
+                .iter()
+                .any(|field| field.name == "deviceId" && field.value == "42")
+        );
+        assert!(
+            feeder
+                .query
+                .iter()
+                .any(|field| field.name == "definition" && field.value == "2")
+        );
+
+        let litter = authenticated()
+            .litter(LitterDeviceType::T6, device_id(77))
+            .with_model::<T6Litter>()
+            .start_live();
+        assert_eq!(litter.method, HttpMethod::Get);
+        assert_eq!(litter.form_fields, []);
+        assert!(
+            litter
+                .query
+                .iter()
+                .any(|field| field.name == "deviceId" && field.value == "77")
+        );
+    }
+
+    #[test]
     fn feeder_mini_settings_use_settings_prefix() {
         use petkit_types::FeederSetting;
 
@@ -292,6 +428,23 @@ mod tests {
 
         assert_eq!(request.path, "k3/deviceData");
         assert_eq!(id.value, "77");
+    }
+
+    #[test]
+    fn fountain_device_detail_uses_device_data_path() {
+        use petkit_types::FountainDeviceType;
+
+        let request = authenticated()
+            .fountain(FountainDeviceType::Ctw3, device_id(42))
+            .device_detail();
+        let id = request
+            .form_fields
+            .iter()
+            .find(|field| field.name == "id")
+            .expect("id field must exist");
+
+        assert_eq!(request.path, "ctw3/deviceData");
+        assert_eq!(id.value, "42");
     }
 
     #[test]

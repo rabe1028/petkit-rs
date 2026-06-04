@@ -10,7 +10,7 @@ include = ["Cargo.toml", "src/**/*", "examples/**/*"]
 
 [features]
 default = ["async", "blocking"]
-async = []
+async = ["dep:futures-timer"]
 action-adapter = []
 blocking = []
 # Enables the bundled reqwest transports. PetKit hosts only serve HTTPS, so a
@@ -33,6 +33,7 @@ ignored = ["md-5"]
 
 [dependencies]
 hex.workspace = true
+futures-timer = { version = "3.0.4", optional = true }
 md-5.workspace = true
 nojson.workspace = true
 petkit-protocol.workspace = true

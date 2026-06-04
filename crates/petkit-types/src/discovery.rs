@@ -143,6 +143,8 @@ mod tests {
             device_name: Some(String::from("Kitchen feeder")),
             device_type: DeviceType::D4s,
             group_id: 1,
+            mac: None,
+            ble_id: None,
             device_type_id: Some(10),
             type_code: Some(20),
             unique_id: unique_id.to_string(),

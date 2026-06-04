@@ -56,6 +56,9 @@ To force a specific discovered device, each family also accepts optional
 | `ureq` blocking | feeder | `cargo run -p petkit-client --example ureq_blocking_feeder_detail --no-default-features --features blocking,ureq-blocking` |
 | `ureq` blocking | litter | `cargo run -p petkit-client --example ureq_blocking_litter_detail --no-default-features --features blocking,ureq-blocking` |
 | `ureq` blocking | purifier | `cargo run -p petkit-client --example ureq_blocking_purifier_detail --no-default-features --features blocking,ureq-blocking` |
+| `reqwest` blocking | Cloud BLE relay probe | `cargo run -p petkit-client --example reqwest_blocking_cloud_ble_probe --no-default-features --features blocking,reqwest-blocking` |
+| `reqwest` blocking | fountain detail/BLE metadata probe | `cargo run -p petkit-client --example reqwest_blocking_fountain_detail_probe --no-default-features --features blocking,reqwest-blocking` |
+| `reqwest` async | camera live-feed probe | `cargo run -p petkit-client --example reqwest_async_camera_live_feed_probe --no-default-features --features async,reqwest-async` |
 | host callback async | canned transport | `cargo run -p petkit-client --example host_callback_async --no-default-features --features async` |
 | host callback blocking | canned transport | `cargo run -p petkit-client --example host_callback_blocking --no-default-features --features blocking` |
 
@@ -63,6 +66,13 @@ Each example logs in, loads `family_list`, picks a feeder/litter/purifier from
 discovery or env vars, builds a concrete `RequestSpec`, reads the broad
 `device_detail`/`deviceData` payload, and prints selected `settings.*` and
 `state.*` keys without mutating the device.
+
+For live account smoke checks, copy `.env.example` to `.env`, set
+`PETKIT_EMAIL` and `PETKIT_PASSWORD`, then run `make petkit-live-smoke`.
+The default smoke path logs in, reads discovery data, probes Cloud BLE relay
+metadata, and does not send device control commands. Set
+`PETKIT_CLOUD_BLE_CONNECT=1` to also call `ble/connect` and `ble/poll`; set
+`PETKIT_SMOKE_CAMERA=1` to opt into the camera live-feed probe.
 
 ## Minimal async example
 
@@ -156,15 +166,15 @@ let client = AsyncPetkitClient::with_session(
 
 If the embedding host exposes a synchronous HTTP capability, use `blocking_host_callback::BlockingHostCallbackTransport` with `BlockingPetkitClient` instead. Both host callback adapters avoid `reqwest` and `ureq`, and neither requires `Send`/`Sync` on the callback, so they can capture plugin-local state.
 
-Camera-capable feeder/litter scopes now expose typed `start_live()` responses with `channel_id`, `rtc_token`, `rtm_token`, `uid`, `app_rtm_user_id`, and `dev_rtm_user_id`. The Agora/WHEP bridge itself remains outside core; keep that in a sidecar or a dedicated integration crate.
+Camera-capable feeder/litter scopes expose typed `start_live()` / `camera_live_feed()` responses with `whep_url`, `app_id`, `channel_id`, `rtc_token`, `rtm_token`, `uid`, `app_rtm_user_id`, and `dev_rtm_user_id`. `petkit-client` also includes an Agora RTM peer-message helper for PetKit camera commands such as heartbeat, start/stop live, and PTZ control.
 
 Camera-capable feeder/litter client scopes also expose `cloud_video()`, `get_m3u8()`, and `get_download_m3u8()` wrappers returning typed media/M3U8 response structures. Media metadata parsing (`MediaListResponse`, `MediaMetadata`, `latest_image_metadata`, `latest_video_metadata`, plus `MediaListResponse::latest_image/latest_video`) is available for application-owned media list request flows, while download/decrypt/storage remain host responsibilities.
 
 `family_list()` results can be flattened with `flatten_devices` or wrapped in `DeviceCatalog` for numeric, unique, or opaque (`"<device_type>:<device_id>"`) id resolution. `client.authenticated().device_detail_for(&summary)` follows the discovered family/type to the correct typed `device_detail` endpoint.
 
-`IotConfigSet::aliyun_mqtt_connection_summary(...)` builds PetKit/Aliyun MQTT connection data (`client_id`, `username`, HMAC-SHA256 password, and `/user/get`/`/user/update` topics). Fountain cloud access stays on the HTTP-backed fountain scope (`device_detail` and `update_setting`). Fountain BLE control is separate: `FountainBleClient` builds or writes raw BLE frames through `BleGattWriter` without requiring a session token, HTTP transport, or cloud `device_id`. It supports power, pause/resume, mode, reset-filter, DND, and indicator-light commands; see `cargo run -p petkit-client --example fountain_ble_writer`.
+`IotConfigSet::aliyun_mqtt_connection_summary(...)` builds PetKit/Aliyun MQTT connection data (`client_id`, `username`, HMAC-SHA256 password, and `/user/get`/`/user/update` topics). Fountain cloud access stays on the HTTP-backed fountain scope (`device_detail` and `update_setting`). Fountain BLE control is separate at the protocol layer: `FountainBleClient` builds or writes raw BLE frames through `BleGattWriter` without requiring a session token, HTTP transport, or cloud `device_id`. `petkit-client` can also execute those Fountain BLE commands through PetKit's Cloud BLE relay via `authenticated().cloud_ble().execute_fountain(...)`. It supports power, pause/resume, mode, reset-filter, DND, and indicator-light commands; see `cargo run -p petkit-client --example fountain_ble_writer`.
 
-With the optional `action-adapter` feature, sidecar-style action names such as `feed`, `play_sound`, `surplus_level`, `update_setting`, `litterbox_clean`, `purifier_power`, and `fountain_reset_filter` can be parsed into typed command values. Generic `update_setting` parsing returns a `CustomSetting`; callers still choose the device-family endpoint. `camera_ptz` is intentionally out of scope here because it belongs to Agora/RTM signaling rather than PETKIT HTTP commands.
+With the optional `action-adapter` feature, sidecar-style action names such as `feed`, `play_sound`, `surplus_level`, `update_setting`, `litterbox_clean`, `purifier_power`, `fountain_reset_filter`, and `camera_ptz` can be parsed into typed command values. Generic `update_setting` parsing returns a `CustomSetting`; callers still choose the device-family endpoint. `camera_ptz` maps to a `CameraRtmCommand` that can be sent with the Agora RTM helper once live-feed metadata is available.
 
 ## Quality commands
 

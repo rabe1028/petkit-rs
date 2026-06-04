@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use nojson::{JsonParseError, JsonValueKind, RawJsonOwned, RawJsonValue};
 
-use crate::{AccountGroup, IotConfigSet, RegionServersPayload, Session};
+use crate::{AccountGroup, IotConfigSet, PETKIT_AGORA_APP_ID, RegionServersPayload, Session};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegionServersResponse {
@@ -45,6 +45,7 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for RequestLoginCodeRespons
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoginResponse {
     pub session: Session,
+    pub api_servers: Vec<String>,
 }
 
 impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LoginResponse {
@@ -53,6 +54,7 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LoginResponse {
     fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         Ok(Self {
             session: value.to_member("session")?.required()?.try_into()?,
+            api_servers: optional_string_array(value.to_member("apiServers")?)?,
         })
     }
 }
@@ -124,6 +126,10 @@ pub type IotDeviceInfoV2Response = IotDeviceInfoResponse;
 pub struct DeviceDetailResponse {
     pub id: Option<u64>,
     pub name: Option<String>,
+    pub device_type: Option<String>,
+    pub group_id: Option<u64>,
+    pub mac: Option<String>,
+    pub ble_id: Option<String>,
     pub sn: Option<String>,
     pub firmware: Option<String>,
     pub settings: Option<RawJsonOwned>,
@@ -152,6 +158,27 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for DeviceDetailResponse {
         Ok(Self {
             id: optional_u64_member(value.to_member("id")?)?,
             name,
+            device_type: optional_string_any(value, &["deviceType", "typeName", "type_name"])?,
+            group_id: optional_u64_member(value.to_member("groupId")?)?,
+            mac: optional_string_any_deep(
+                value,
+                &[
+                    "mac",
+                    "btMac",
+                    "bt_mac",
+                    "deviceMac",
+                    "bleMac",
+                    "ble_mac",
+                    "bluetoothMac",
+                    "bluetooth_mac",
+                    "macAddress",
+                    "mac_address",
+                ],
+            )?,
+            ble_id: optional_string_any_deep(
+                value,
+                &["bleId", "ble_id", "bleDeviceId", "ble_device_id"],
+            )?,
             sn: optional_string_member(value.to_member("sn")?)?,
             firmware: optional_text_member(value.to_member("firmware")?)?,
             settings: optional_raw_member(value.to_member("settings")?)?,
@@ -262,6 +289,8 @@ pub type PetUpdateSettingResponse = UpdateSettingResponse;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveFeedResponse {
     pub accepted: bool,
+    pub whep_url: Option<String>,
+    pub app_id: Option<String>,
     pub channel_id: Option<String>,
     pub rtc_token: Option<String>,
     pub rtm_token: Option<String>,
@@ -275,6 +304,8 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LiveFeedResponse {
 
     fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
         let payload = live_feed_payload(value)?;
+        let whep_url = optional_string_any(payload, &["whepUrl", "whep_url", "whep"])?;
+        let parsed_app_id = optional_string_any(payload, &["appId", "app_id"])?;
         let channel_id = optional_string_any(payload, &["channelId", "channel_id"])?;
         let rtc_token = optional_string_any(payload, &["rtcToken", "rtc_token"])?;
         let rtm_token = optional_string_any(payload, &["rtmToken", "rtm_token"])?;
@@ -283,13 +314,18 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LiveFeedResponse {
         let uid = optional_u32_any(payload, &["uid", "userId", "user_id"])?
             .or_else(|| uid_from_rtm_user_id(app_rtm_user_id.as_deref()));
         let has_live_payload = channel_id.is_some()
+            || whep_url.is_some()
+            || parsed_app_id.is_some()
             || rtc_token.is_some()
             || rtm_token.is_some()
             || uid.is_some()
             || app_rtm_user_id.is_some()
             || dev_rtm_user_id.is_some();
+        let app_id = parsed_app_id.or_else(|| Some(PETKIT_AGORA_APP_ID.to_string()));
         Ok(Self {
             accepted: live_feed_accepted(value, payload, has_live_payload)?,
+            whep_url,
+            app_id,
             channel_id,
             rtc_token,
             rtm_token,
@@ -301,6 +337,7 @@ impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for LiveFeedResponse {
 }
 
 pub type StartLiveResponse = LiveFeedResponse;
+pub type CameraLiveFeed = LiveFeedResponse;
 pub type FeederStartLiveResponse = StartLiveResponse;
 pub type LitterStartLiveResponse = StartLiveResponse;
 pub type OpenCameraResponse = LiveFeedResponse;
@@ -320,6 +357,19 @@ fn optional_u64_member<'text, 'raw, 'a>(
         }
         Some(value) => u64::try_from(value).map(Some),
         None => Ok(None),
+    }
+}
+
+fn optional_string_array<'text, 'raw, 'a>(
+    member: nojson::RawJsonMember<'text, 'raw, 'a>,
+) -> Result<Vec<String>, JsonParseError> {
+    match member.optional() {
+        Some(value) if value.kind() == JsonValueKind::Null => Ok(Vec::new()),
+        Some(value) => value
+            .to_array()?
+            .map(String::try_from)
+            .collect::<Result<Vec<_>, _>>(),
+        None => Ok(Vec::new()),
     }
 }
 
@@ -398,8 +448,70 @@ fn optional_string_any(
     for name in names {
         match value.to_member(name)?.optional() {
             Some(member) if member.kind() == JsonValueKind::Null => {}
-            Some(member) => return String::try_from(member).map(Some),
+            Some(member) => return scalar_to_string(member).map(Some),
             None => {}
+        }
+    }
+    Ok(None)
+}
+
+fn scalar_to_string(value: RawJsonValue<'_, '_>) -> Result<String, JsonParseError> {
+    match value.kind() {
+        JsonValueKind::String => String::try_from(value),
+        JsonValueKind::Integer | JsonValueKind::Float => Ok(String::from(value.as_number_str()?)),
+        JsonValueKind::Boolean => Ok(if bool::try_from(value)? {
+            String::from("true")
+        } else {
+            String::from("false")
+        }),
+        JsonValueKind::Array | JsonValueKind::Object | JsonValueKind::Null => {
+            Err(value.invalid("expected scalar string-compatible value"))
+        }
+    }
+}
+
+fn optional_string_any_deep(
+    value: RawJsonValue<'_, '_>,
+    names: &[&str],
+) -> Result<Option<String>, JsonParseError> {
+    optional_string_any_deep_inner(value, names, 0)
+}
+
+fn optional_string_any_deep_inner(
+    value: RawJsonValue<'_, '_>,
+    names: &[&str],
+    depth: usize,
+) -> Result<Option<String>, JsonParseError> {
+    if value.kind() != JsonValueKind::Object {
+        return Ok(None);
+    }
+    if let Some(found) = optional_string_any(value, names)? {
+        return Ok(Some(found));
+    }
+    if depth >= 4 {
+        return Ok(None);
+    }
+    for (_, member) in value.to_object()? {
+        match member.kind() {
+            JsonValueKind::Object => {
+                if let Some(found) = optional_string_any_deep_inner(member, names, depth + 1)? {
+                    return Ok(Some(found));
+                }
+            }
+            JsonValueKind::Array => {
+                for item in member.to_array()? {
+                    if item.kind() == JsonValueKind::Object
+                        && let Some(found) = optional_string_any_deep_inner(item, names, depth + 1)?
+                    {
+                        return Ok(Some(found));
+                    }
+                }
+            }
+            JsonValueKind::Null
+            | JsonValueKind::Boolean
+            | JsonValueKind::Integer
+            | JsonValueKind::Float
+            | JsonValueKind::String => {}
         }
     }
     Ok(None)
@@ -534,11 +646,12 @@ mod tests {
     #[test]
     fn login_response_parses_nested_session() {
         let response = with_result(
-            r#"{"result":{"session":{"id":"s1","userId":"u1","expiresIn":3600,"region":"DE","createdAt":"2026-05-27T00:00:00.000+0000","refreshedAt":null}}}"#,
+            r#"{"result":{"apiServers":["https://api.petkt.com/6/"],"session":{"id":"s1","userId":"u1","expiresIn":3600,"region":"DE","createdAt":"2026-05-27T00:00:00.000+0000","refreshedAt":null}}}"#,
             |value| LoginResponse::try_from(value).expect("login response should parse"),
         );
 
         assert_eq!(response.session.id.expose_secret(), "s1");
+        assert_eq!(response.api_servers, ["https://api.petkt.com/6/"]);
         assert_eq!(Session::from(response).user_id, "u1");
     }
 
@@ -553,6 +666,19 @@ mod tests {
         assert_eq!(
             response.groups[0].pet_list[0].pet_name,
             String::from("mugi")
+        );
+    }
+
+    #[test]
+    fn family_list_response_stringifies_numeric_ble_ids() {
+        let response = with_result(
+            r#"{"result":[{"deviceList":[{"deviceId":42,"deviceName":"fountain","deviceType":"ctw3","groupId":1,"mac":"aa:bb","bleId":12345,"type":14,"typeCode":14,"uniqueId":"u-42"}],"groupId":1,"name":"home","petList":[]}]}"#,
+            |value| FamilyListResponse::try_from(value).expect("family list response should parse"),
+        );
+
+        assert_eq!(
+            response.groups[0].device_list[0].ble_id.as_deref(),
+            Some("12345")
         );
     }
 
@@ -644,6 +770,17 @@ mod tests {
     }
 
     #[test]
+    fn device_detail_response_finds_nested_cloud_ble_identifiers() {
+        let response = with_result(
+            r#"{"result":{"id":1000024016,"name":"ctw3 fountain","deviceType":"ctw3","deviceInfo":{"bluetoothMac":"aa:bb:cc:dd:ee:ff","bleDeviceId":12345},"settings":{},"state":{}}}"#,
+            |value| DeviceDetailResponse::try_from(value).expect("device detail should parse"),
+        );
+
+        assert_eq!(response.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+        assert_eq!(response.ble_id.as_deref(), Some("12345"));
+    }
+
+    #[test]
     fn live_feed_response_parses_agora_tokens_and_uid_aliases() {
         let response = with_result(
             r#"{"result":{"channelId":"ch-1","rtcToken":"rtc","rtmToken":"rtm","appRtmUserId":"app_123","devRtmUserId":"dev_456"}}"#,
@@ -654,6 +791,7 @@ mod tests {
         assert_eq!(response.channel_id.as_deref(), Some("ch-1"));
         assert_eq!(response.rtc_token.as_deref(), Some("rtc"));
         assert_eq!(response.rtm_token.as_deref(), Some("rtm"));
+        assert_eq!(response.app_id.as_deref(), Some(PETKIT_AGORA_APP_ID));
         assert_eq!(response.uid, Some(123));
         assert_eq!(response.app_rtm_user_id.as_deref(), Some("app_123"));
         assert_eq!(response.dev_rtm_user_id.as_deref(), Some("dev_456"));
