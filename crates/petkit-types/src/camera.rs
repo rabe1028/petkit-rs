@@ -139,11 +139,26 @@ fn optional_string_any(
     for key in keys {
         match value.to_member(key)?.optional() {
             Some(value) if value.kind() == JsonValueKind::Null => {}
-            Some(value) => return String::try_from(value).map(Some),
+            Some(value) => return scalar_to_string(value).map(Some),
             None => {}
         }
     }
     Ok(None)
+}
+
+fn scalar_to_string(value: RawJsonValue<'_, '_>) -> Result<String, JsonParseError> {
+    match value.kind() {
+        JsonValueKind::String => String::try_from(value),
+        JsonValueKind::Integer | JsonValueKind::Float => Ok(String::from(value.as_number_str()?)),
+        JsonValueKind::Boolean => Ok(if bool::try_from(value)? {
+            String::from("true")
+        } else {
+            String::from("false")
+        }),
+        JsonValueKind::Array | JsonValueKind::Object | JsonValueKind::Null => {
+            Err(value.invalid("expected scalar string-compatible value"))
+        }
+    }
 }
 
 fn agora_truthy(
@@ -154,7 +169,7 @@ fn agora_truthy(
     if matches!(result, Some("success")) {
         return Ok(true);
     }
-    if matches!(code, Some("message_sent" | "message_delivered")) {
+    if matches!(code, Some("0" | "message_sent" | "message_delivered")) {
         return Ok(true);
     }
     if code.is_some() {
@@ -208,6 +223,15 @@ mod tests {
         let response = AgoraRtmResponse::try_from(raw.value()).expect("response should parse");
         assert!(response.accepted);
         assert_eq!(response.code.as_deref(), Some("message_delivered"));
+    }
+
+    #[test]
+    fn agora_rtm_response_accepts_numeric_success_code() {
+        let raw = RawJson::parse(r#"{"code":0,"message_id":"msg"}"#).expect("fixture should parse");
+        let response = AgoraRtmResponse::try_from(raw.value()).expect("response should parse");
+
+        assert!(response.accepted);
+        assert_eq!(response.code.as_deref(), Some("0"));
     }
 
     #[test]

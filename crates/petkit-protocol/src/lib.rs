@@ -44,11 +44,11 @@ mod tests {
     };
 
     use super::{
-        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, D4shFeeder,
-        DualManualFeedAmount, FeederMiniFeeder, FountainBleClient, FountainBleSettings,
-        HttpMethod, PublicProtocol, ResponseParts, SingleManualFeedAmount, T6Litter,
-        build_ble_frame, build_fountain_ble_command,
-        camera_rtm_peer_message, parse_api_response, parse_text_response, write_fountain_ble_frame,
+        AuthenticatedProtocol, BaseUrl, BleGattWriter, D4sFeeder, D4shFeeder, DualManualFeedAmount,
+        FeederMiniFeeder, FountainBleClient, FountainBleSettings, HttpMethod, PublicProtocol,
+        ResponseParts, SingleManualFeedAmount, T6Litter, build_ble_frame,
+        build_fountain_ble_command, camera_rtm_peer_message, parse_api_response,
+        parse_text_response, write_fountain_ble_frame,
     };
 
     fn context() -> ClientContext {

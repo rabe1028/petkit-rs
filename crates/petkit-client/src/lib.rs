@@ -960,15 +960,31 @@ where
         &self,
         device: &DeviceSummary,
     ) -> Result<Option<CloudBleMetadata>, ClientError<T::Error>> {
-        if let Some(metadata) = device.cloud_ble_metadata() {
-            return Ok(Some(metadata));
+        let summary_metadata = device.cloud_ble_metadata();
+        if summary_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(summary_metadata);
         }
         let detail_metadata = match self.client.authenticated().device_detail_for(device).await {
             Ok(detail) => discovered_cloud_ble_metadata_for_summary(device, detail),
             Err(_) => None,
         };
-        if detail_metadata.is_some() {
-            return Ok(detail_metadata);
+        let mut partial_metadata = merge_cloud_ble_metadata(summary_metadata, detail_metadata);
+        if partial_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(partial_metadata);
+        }
+        if partial_metadata.is_some() {
+            let relay_metadata = match self.supported_devices_for_group(device.group_id).await {
+                Ok(relays) => match_cloud_ble_metadata(device, &relays),
+                Err(_) => None,
+            };
+            partial_metadata = merge_cloud_ble_metadata(partial_metadata, relay_metadata);
+            return Ok(partial_metadata);
         }
         let relays = self.supported_devices_for_group(device.group_id).await?;
         Ok(match_cloud_ble_metadata(device, &relays))
@@ -1167,15 +1183,31 @@ where
         &self,
         device: &DeviceSummary,
     ) -> Result<Option<CloudBleMetadata>, ClientError<T::Error>> {
-        if let Some(metadata) = device.cloud_ble_metadata() {
-            return Ok(Some(metadata));
+        let summary_metadata = device.cloud_ble_metadata();
+        if summary_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(summary_metadata);
         }
         let detail_metadata = match self.client.authenticated().device_detail_for(device) {
             Ok(detail) => discovered_cloud_ble_metadata_for_summary(device, detail),
             Err(_) => None,
         };
-        if detail_metadata.is_some() {
-            return Ok(detail_metadata);
+        let mut partial_metadata = merge_cloud_ble_metadata(summary_metadata, detail_metadata);
+        if partial_metadata
+            .as_ref()
+            .is_some_and(cloud_ble_metadata_has_ble_id)
+        {
+            return Ok(partial_metadata);
+        }
+        if partial_metadata.is_some() {
+            let relay_metadata = match self.supported_devices_for_group(device.group_id) {
+                Ok(relays) => match_cloud_ble_metadata(device, &relays),
+                Err(_) => None,
+            };
+            partial_metadata = merge_cloud_ble_metadata(partial_metadata, relay_metadata);
+            return Ok(partial_metadata);
         }
         let relays = self.supported_devices_for_group(device.group_id)?;
         Ok(match_cloud_ble_metadata(device, &relays))
@@ -1323,6 +1355,38 @@ fn discovered_cloud_ble_metadata_for_summary(
 #[cfg(any(feature = "async", feature = "blocking"))]
 fn non_empty_string(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn cloud_ble_metadata_has_ble_id(metadata: &CloudBleMetadata) -> bool {
+    metadata
+        .ble_id
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn merge_cloud_ble_metadata(
+    primary: Option<CloudBleMetadata>,
+    fallback: Option<CloudBleMetadata>,
+) -> Option<CloudBleMetadata> {
+    let Some(mut primary) = primary else {
+        return fallback;
+    };
+    let Some(fallback) = fallback else {
+        return Some(primary);
+    };
+    if !cloud_ble_metadata_has_ble_id(&primary) {
+        primary.ble_id = fallback.ble_id;
+    }
+    if primary
+        .group_id
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        primary.group_id = fallback.group_id;
+    }
+    Some(primary)
 }
 
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -3056,6 +3120,7 @@ mod tests {
     use super::{BlockingPetkitClient, BlockingTransport};
     use super::{
         discovered_cloud_ble_metadata_for_summary, hash_password_md5, match_cloud_ble_metadata,
+        merge_cloud_ble_metadata,
     };
     #[cfg(feature = "blocking")]
     use secrecy::ExposeSecret;
@@ -3728,6 +3793,66 @@ mod tests {
         assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
         assert_eq!(metadata.group_id.as_deref(), Some("7"));
         assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_merges_relay_ble_id_into_partial_metadata() {
+        let primary = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("aa:bb:cc:dd:ee:ff"),
+            group_id: Some(String::from("7")),
+            ble_id: None,
+        };
+        let relay = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("11:22:33:44:55:66"),
+            group_id: Some(String::from("7")),
+            ble_id: Some(String::from("ble-ctw3")),
+        };
+
+        let metadata = merge_cloud_ble_metadata(Some(primary), Some(relay))
+            .expect("partial metadata should remain available");
+
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_keeps_summary_mac_when_detail_fills_ble_id() {
+        let summary = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("aa:bb:cc:dd:ee:ff"),
+            group_id: Some(String::from("7")),
+            ble_id: None,
+        };
+        let detail = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("11:22:33:44:55:66"),
+            group_id: Some(String::from("7")),
+            ble_id: Some(String::from("detail-ble")),
+        };
+
+        let metadata = merge_cloud_ble_metadata(Some(summary), Some(detail))
+            .expect("summary metadata should remain available");
+
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.ble_id.as_deref(), Some("detail-ble"));
+    }
+
+    #[test]
+    fn cloud_ble_metadata_keeps_partial_metadata_without_relay_match() {
+        let primary = CloudBleMetadata {
+            device_type: String::from("14"),
+            mac: String::from("aa:bb:cc:dd:ee:ff"),
+            group_id: Some(String::from("7")),
+            ble_id: None,
+        };
+
+        let metadata = merge_cloud_ble_metadata(Some(primary), None)
+            .expect("partial metadata should remain available");
+
+        assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(metadata.ble_id, None);
     }
 
     #[cfg(feature = "blocking")]

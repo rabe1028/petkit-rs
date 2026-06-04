@@ -3,7 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use hmac::{Hmac, Mac};
-use nojson::{JsonParseError, RawJsonValue};
+use nojson::{JsonParseError, JsonValueKind, RawJsonValue};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -398,12 +398,27 @@ fn optional_string_any(
 ) -> Result<Option<String>, JsonParseError> {
     for key in keys {
         match value.to_member(key)?.optional() {
-            Some(value) if value.kind() == nojson::JsonValueKind::Null => {}
-            Some(value) => return String::try_from(value).map(Some),
+            Some(value) if value.kind() == JsonValueKind::Null => {}
+            Some(value) => return scalar_to_string(value).map(Some),
             None => {}
         }
     }
     Ok(None)
+}
+
+fn scalar_to_string(value: RawJsonValue<'_, '_>) -> Result<String, JsonParseError> {
+    match value.kind() {
+        JsonValueKind::String => String::try_from(value),
+        JsonValueKind::Integer | JsonValueKind::Float => Ok(String::from(value.as_number_str()?)),
+        JsonValueKind::Boolean => Ok(if bool::try_from(value)? {
+            String::from("true")
+        } else {
+            String::from("false")
+        }),
+        JsonValueKind::Array | JsonValueKind::Object | JsonValueKind::Null => {
+            Err(value.invalid("expected scalar string-compatible value"))
+        }
+    }
 }
 
 fn optional_list<'text, 'raw, 'a, T>(

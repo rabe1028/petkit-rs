@@ -448,11 +448,26 @@ fn optional_string_any(
     for name in names {
         match value.to_member(name)?.optional() {
             Some(member) if member.kind() == JsonValueKind::Null => {}
-            Some(member) => return String::try_from(member).map(Some),
+            Some(member) => return scalar_to_string(member).map(Some),
             None => {}
         }
     }
     Ok(None)
+}
+
+fn scalar_to_string(value: RawJsonValue<'_, '_>) -> Result<String, JsonParseError> {
+    match value.kind() {
+        JsonValueKind::String => String::try_from(value),
+        JsonValueKind::Integer | JsonValueKind::Float => Ok(String::from(value.as_number_str()?)),
+        JsonValueKind::Boolean => Ok(if bool::try_from(value)? {
+            String::from("true")
+        } else {
+            String::from("false")
+        }),
+        JsonValueKind::Array | JsonValueKind::Object | JsonValueKind::Null => {
+            Err(value.invalid("expected scalar string-compatible value"))
+        }
+    }
 }
 
 fn optional_string_any_deep(
@@ -655,6 +670,19 @@ mod tests {
     }
 
     #[test]
+    fn family_list_response_stringifies_numeric_ble_ids() {
+        let response = with_result(
+            r#"{"result":[{"deviceList":[{"deviceId":42,"deviceName":"fountain","deviceType":"ctw3","groupId":1,"mac":"aa:bb","bleId":12345,"type":14,"typeCode":14,"uniqueId":"u-42"}],"groupId":1,"name":"home","petList":[]}]}"#,
+            |value| FamilyListResponse::try_from(value).expect("family list response should parse"),
+        );
+
+        assert_eq!(
+            response.groups[0].device_list[0].ble_id.as_deref(),
+            Some("12345")
+        );
+    }
+
+    #[test]
     fn command_response_accepts_truthy_result_values() {
         assert!(with_result(r#"{"result":1}"#, |value| {
             CommandResponse::try_from(value)
@@ -744,12 +772,12 @@ mod tests {
     #[test]
     fn device_detail_response_finds_nested_cloud_ble_identifiers() {
         let response = with_result(
-            r#"{"result":{"id":1000024016,"name":"ctw3 fountain","deviceType":"ctw3","deviceInfo":{"bluetoothMac":"aa:bb:cc:dd:ee:ff","bleDeviceId":"ble-ctw3"},"settings":{},"state":{}}}"#,
+            r#"{"result":{"id":1000024016,"name":"ctw3 fountain","deviceType":"ctw3","deviceInfo":{"bluetoothMac":"aa:bb:cc:dd:ee:ff","bleDeviceId":12345},"settings":{},"state":{}}}"#,
             |value| DeviceDetailResponse::try_from(value).expect("device detail should parse"),
         );
 
         assert_eq!(response.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
-        assert_eq!(response.ble_id.as_deref(), Some("ble-ctw3"));
+        assert_eq!(response.ble_id.as_deref(), Some("12345"));
     }
 
     #[test]
