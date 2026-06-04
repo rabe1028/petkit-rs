@@ -3,7 +3,9 @@
 
 extern crate alloc;
 
+mod camera;
 mod client;
+mod cloud_ble;
 mod command;
 mod device;
 mod discovery;
@@ -15,7 +17,13 @@ mod session;
 mod setting;
 mod value;
 
+pub use camera::{AgoraRtmResponse, CameraRtmCommand, PtzDirection, PtzKind, json_string};
 pub use client::{ClientContext, ClientProfile};
+pub use cloud_ble::{
+    CloudBleConnectRequest, CloudBleConnection, CloudBleControlRequest, CloudBleControlResponse,
+    CloudBleDevice, CloudBleDevicesResponse, CloudBleMetadata, CloudBlePollRequest,
+    CloudBlePollState,
+};
 pub use command::{
     DeviceAction, DeviceCommand, FeederCommand, FountainAction, LbCommand, LitterCommand,
     PetCommand, PurifierMode,
@@ -35,29 +43,29 @@ pub use region::{
     RegionServerGroup, RegionServersPayload, gateway_label, group_region_servers,
 };
 pub use response::{
-    CalibrationResponse, CallPetResponse, CancelManualFeedResponse, CommandResponse,
-    ControlDeviceResponse, DeviceDetailResponse, FamilyListResponse, FeederCalibrationResponse,
-    FeederCallPetResponse, FeederCancelManualFeedResponse, FeederDeviceDetailResponse,
-    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
-    FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
-    FeederRestoreDailyFeedResponse, FeederRestoreFeedResponse, FeederSaveFeedResponse,
-    FeederSaveRepeatsResponse, FeederScheduleCompleteResponse, FeederScheduleRemoveResponse,
-    FeederScheduleSaveResponse, FeederSettingsReadResponse, FeederStartLiveResponse,
-    FeederSuspendFeedResponse, FeederUpdateSettingResponse, FoodReplenishedResponse,
-    FountainDeviceDetailResponse, FountainSettingsReadResponse, FountainUpdateSettingResponse,
-    IotDeviceInfoResponse, IotDeviceInfoV1Response, IotDeviceInfoV2Response,
-    LitterControlDeviceResponse, LitterDeviceDetailResponse, LitterOpenCameraResponse,
-    LitterResetN50DeodorizerResponse, LitterScheduleCompleteResponse, LitterScheduleRemoveResponse,
-    LitterScheduleSaveResponse, LitterSettingsReadResponse, LitterStartLiveResponse,
-    LitterUpdateSettingResponse, LiveFeedResponse, LoginResponse, ManualFeedResponse,
-    OpenCameraResponse, PetUpdateSettingResponse, PlaySoundResponse, PuraMaxControlDeviceResponse,
-    PuraMaxResetDeodorizerResponse, PurifierControlDeviceResponse, PurifierDeviceDetailResponse,
-    PurifierSettingsReadResponse, PurifierUpdateSettingResponse, RefreshSessionResponse,
-    RegionServersResponse, RemoveDailyFeedResponse, RequestLoginCodeResponse,
-    ResetDesiccantResponse, ResetN50DeodorizerResponse, RestoreDailyFeedResponse,
-    RestoreFeedResponse, SaveFeedResponse, SaveRepeatsResponse, ScheduleCompleteResponse,
-    ScheduleRemoveResponse, ScheduleSaveResponse, StartLiveResponse, SuspendFeedResponse,
-    UpdateSettingResponse,
+    CalibrationResponse, CallPetResponse, CameraLiveFeed, CancelManualFeedResponse,
+    CommandResponse, ControlDeviceResponse, DeviceDetailResponse, FamilyListResponse,
+    FeederCalibrationResponse, FeederCallPetResponse, FeederCancelManualFeedResponse,
+    FeederDeviceDetailResponse, FeederFoodReplenishedResponse, FeederManualFeedResponse,
+    FeederOpenCameraResponse, FeederPlaySoundResponse, FeederRemoveDailyFeedResponse,
+    FeederResetDesiccantResponse, FeederRestoreDailyFeedResponse, FeederRestoreFeedResponse,
+    FeederSaveFeedResponse, FeederSaveRepeatsResponse, FeederScheduleCompleteResponse,
+    FeederScheduleRemoveResponse, FeederScheduleSaveResponse, FeederSettingsReadResponse,
+    FeederStartLiveResponse, FeederSuspendFeedResponse, FeederUpdateSettingResponse,
+    FoodReplenishedResponse, FountainDeviceDetailResponse, FountainSettingsReadResponse,
+    FountainUpdateSettingResponse, IotDeviceInfoResponse, IotDeviceInfoV1Response,
+    IotDeviceInfoV2Response, LitterControlDeviceResponse, LitterDeviceDetailResponse,
+    LitterOpenCameraResponse, LitterResetN50DeodorizerResponse, LitterScheduleCompleteResponse,
+    LitterScheduleRemoveResponse, LitterScheduleSaveResponse, LitterSettingsReadResponse,
+    LitterStartLiveResponse, LitterUpdateSettingResponse, LiveFeedResponse, LoginResponse,
+    ManualFeedResponse, OpenCameraResponse, PetUpdateSettingResponse, PlaySoundResponse,
+    PuraMaxControlDeviceResponse, PuraMaxResetDeodorizerResponse, PurifierControlDeviceResponse,
+    PurifierDeviceDetailResponse, PurifierSettingsReadResponse, PurifierUpdateSettingResponse,
+    RefreshSessionResponse, RegionServersResponse, RemoveDailyFeedResponse,
+    RequestLoginCodeResponse, ResetDesiccantResponse, ResetN50DeodorizerResponse,
+    RestoreDailyFeedResponse, RestoreFeedResponse, SaveFeedResponse, SaveRepeatsResponse,
+    ScheduleCompleteResponse, ScheduleRemoveResponse, ScheduleSaveResponse, StartLiveResponse,
+    SuspendFeedResponse, UpdateSettingResponse,
 };
 pub use session::{
     AccountGroup, AliyunMqttConnectionSummary, AliyunMqttOptions, AliyunSecureMode, DeviceSummary,

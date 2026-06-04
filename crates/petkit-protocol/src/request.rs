@@ -85,6 +85,25 @@ impl FormField {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RequestBody {
+    pub content_type: Cow<'static, str>,
+    pub body: String,
+}
+
+impl RequestBody {
+    pub fn new(content_type: impl Into<Cow<'static, str>>, body: impl Into<String>) -> Self {
+        Self {
+            content_type: content_type.into(),
+            body: body.into(),
+        }
+    }
+
+    pub fn json(body: impl Into<String>) -> Self {
+        Self::new("application/json", body)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestSpec {
     pub method: HttpMethod,
     pub url: String,
@@ -92,6 +111,7 @@ pub struct RequestSpec {
     pub headers: Vec<Header>,
     pub query: Vec<QueryField>,
     pub form_fields: Vec<FormField>,
+    pub body: Option<RequestBody>,
 }
 
 impl RequestSpec {
@@ -105,6 +125,7 @@ impl RequestSpec {
             headers: Vec::new(),
             query: Vec::new(),
             form_fields: Vec::new(),
+            body: None,
         }
     }
 
@@ -147,6 +168,18 @@ impl RequestSpec {
         value: impl Into<String>,
     ) -> Self {
         self.form_fields.push(FormField::new(name, value));
+        self
+    }
+
+    #[must_use]
+    pub fn with_body(mut self, body: RequestBody) -> Self {
+        self.body = Some(body);
+        self
+    }
+
+    #[must_use]
+    pub fn with_json_body(mut self, body: impl Into<String>) -> Self {
+        self.body = Some(RequestBody::json(body));
         self
     }
 

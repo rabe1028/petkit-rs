@@ -8,25 +8,29 @@ use md5::{Digest, Md5};
 use nojson::{JsonParseError, RawJsonValue};
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_protocol::{
-    AuthenticatedProtocol, BaseUrl, DynamicFeeder, DynamicLitter, FeederModel, FeederScope,
-    FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
+    AuthenticatedProtocol, BaseUrl, CloudBleScope, DynamicFeeder, DynamicLitter, FeederModel,
+    FeederScope, FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
     FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope, LitterModel, LitterScope,
     LitterSupportsCamera, LitterSupportsN50Deodorizer, ManualFeedAmount, PetScope, PublicProtocol,
-    PurifierScope, RequestSpec, ResponseParts, parse_api_response,
+    PurifierScope, RequestSpec, ResponseParts, camera_rtm_peer_message, parse_api_response,
+    parse_json_response,
 };
 use petkit_types::PetkitError;
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_types::{
-    AccountGroup, CalibrationAction, ClientContext, CloudVideoResponse, DeviceCatalog,
-    DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList, FeedEntryId,
-    FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
-    FeederCancelManualFeedResponse, FeederDeviceDetailResponse, FeederDeviceType,
-    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
-    FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
-    FeederRestoreDailyFeedResponse, FeederRestoreFeedResponse, FeederSaveFeedResponse,
-    FeederSaveRepeatsResponse, FeederScheduleCompleteResponse, FeederScheduleRemoveResponse,
-    FeederScheduleSaveResponse, FeederSetting, FeederStartLiveResponse, FeederSuspendFeedResponse,
-    FeederUpdateSettingResponse, FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
+    AccountGroup, AgoraRtmResponse, CalibrationAction, CameraLiveFeed, CameraRtmCommand,
+    ClientContext, CloudBleConnectRequest, CloudBleConnection, CloudBleControlRequest,
+    CloudBleControlResponse, CloudBleDevice, CloudBleDevicesResponse, CloudBleMetadata,
+    CloudBlePollRequest, CloudBlePollState, CloudVideoResponse, DeviceCatalog, DeviceFamilyKind,
+    DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList, FeedEntryId, FeedIdentifier,
+    FeederCalibrationResponse, FeederCallPetResponse, FeederCancelManualFeedResponse,
+    FeederDeviceDetailResponse, FeederDeviceType, FeederFoodReplenishedResponse,
+    FeederManualFeedResponse, FeederOpenCameraResponse, FeederPlaySoundResponse,
+    FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse, FeederRestoreDailyFeedResponse,
+    FeederRestoreFeedResponse, FeederSaveFeedResponse, FeederSaveRepeatsResponse,
+    FeederScheduleCompleteResponse, FeederScheduleRemoveResponse, FeederScheduleSaveResponse,
+    FeederSetting, FeederStartLiveResponse, FeederSuspendFeedResponse, FeederUpdateSettingResponse,
+    FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
     FountainUpdateSettingResponse, GetDownloadM3u8Response, GetM3u8Response, IotConfigSet,
     IotDeviceInfoV1Response, IotDeviceInfoV2Response, LitterControl, LitterControlDeviceResponse,
     LitterDeviceDetailResponse, LitterDeviceType, LitterOpenCameraResponse,
@@ -134,6 +138,15 @@ impl<T> AsyncPetkitClient<T> {
     pub fn set_session(&mut self, session_id: impl Into<String>) {
         self.auth.set_session(session_id);
     }
+
+    fn apply_login_response(&mut self, response: LoginResponse) -> Session {
+        if let Some(base_url) = response.api_servers.first() {
+            self.auth.set_base_url(BaseUrl::Regional(base_url.clone()));
+        }
+        let session = response.session;
+        self.auth.set_session(session.id.expose_secret());
+        session
+    }
 }
 
 #[cfg(feature = "async")]
@@ -172,8 +185,7 @@ where
                     .login_with_password(username, &password_md5, region),
             )
             .await?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -187,8 +199,7 @@ where
         let response: LoginResponse = self
             .execute_typed(self.public.login_with_code(username, valid_code, region))
             .await?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -239,6 +250,21 @@ where
             .await
             .map_err(ClientError::Transport)?;
         Ok(parse_api_response(&response)?)
+    }
+
+    pub async fn execute_json_typed<R>(
+        &self,
+        request: RequestSpec,
+    ) -> Result<R, ClientError<T::Error>>
+    where
+        R: for<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>, Error = JsonParseError>,
+    {
+        let response = self
+            .transport
+            .send(request)
+            .await
+            .map_err(ClientError::Transport)?;
+        Ok(parse_json_response(&response)?)
     }
 }
 
@@ -294,6 +320,15 @@ impl<T> BlockingPetkitClient<T> {
     pub fn set_session(&mut self, session_id: impl Into<String>) {
         self.auth.set_session(session_id);
     }
+
+    fn apply_login_response(&mut self, response: LoginResponse) -> Session {
+        if let Some(base_url) = response.api_servers.first() {
+            self.auth.set_base_url(BaseUrl::Regional(base_url.clone()));
+        }
+        let session = response.session;
+        self.auth.set_session(session.id.expose_secret());
+        session
+    }
 }
 
 #[cfg(feature = "blocking")]
@@ -326,8 +361,7 @@ where
             &password_md5,
             region,
         ))?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -340,8 +374,7 @@ where
     ) -> Result<Session, ClientError<T::Error>> {
         let response: LoginResponse =
             self.execute_typed(self.public.login_with_code(username, valid_code, region))?;
-        let session = response.session;
-        self.auth.set_session(session.id.expose_secret());
+        let session = self.apply_login_response(response);
         Ok(session)
     }
 
@@ -390,6 +423,17 @@ where
             .map_err(ClientError::Transport)?;
         Ok(parse_api_response(&response)?)
     }
+
+    pub fn execute_json_typed<R>(&self, request: RequestSpec) -> Result<R, ClientError<T::Error>>
+    where
+        R: for<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>, Error = JsonParseError>,
+    {
+        let response = self
+            .transport
+            .send(request)
+            .map_err(ClientError::Transport)?;
+        Ok(parse_json_response(&response)?)
+    }
 }
 
 // ---------- Client-backed authenticated scopes ----------
@@ -408,6 +452,12 @@ impl<'a, T> AsyncAuthenticatedClient<'a, T> {
 
     pub fn protocol(&self) -> &AuthenticatedProtocol {
         &self.client.auth
+    }
+
+    pub fn cloud_ble(&self) -> AsyncCloudBleClient<'a, T> {
+        AsyncCloudBleClient {
+            client: self.client,
+        }
     }
 
     pub fn feeder(
@@ -544,6 +594,16 @@ where
             }
         }
     }
+
+    pub async fn send_camera_rtm_command(
+        &self,
+        live_feed: &CameraLiveFeed,
+        command: CameraRtmCommand,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.client
+            .execute_json_typed(camera_rtm_peer_message(live_feed, &command)?)
+            .await
+    }
 }
 
 #[cfg(feature = "blocking")]
@@ -560,6 +620,12 @@ impl<'a, T> BlockingAuthenticatedClient<'a, T> {
 
     pub fn protocol(&self) -> &AuthenticatedProtocol {
         &self.client.auth
+    }
+
+    pub fn cloud_ble(&self) -> BlockingCloudBleClient<'a, T> {
+        BlockingCloudBleClient {
+            client: self.client,
+        }
     }
 
     pub fn feeder(
@@ -691,6 +757,272 @@ where
                 .into())
             }
         }
+    }
+
+    pub fn send_camera_rtm_command(
+        &self,
+        live_feed: &CameraLiveFeed,
+        command: CameraRtmCommand,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.client
+            .execute_json_typed(camera_rtm_peer_message(live_feed, &command)?)
+    }
+}
+
+#[cfg(feature = "async")]
+#[derive(Debug)]
+pub struct AsyncCloudBleClient<'a, T> {
+    client: &'a AsyncPetkitClient<T>,
+}
+
+#[cfg(feature = "async")]
+impl<T> AsyncCloudBleClient<'_, T> {
+    pub fn requests(&self) -> CloudBleScope {
+        self.client.auth.cloud_ble()
+    }
+
+    pub fn supported_devices_request(&self) -> RequestSpec {
+        self.requests().supported_devices()
+    }
+
+    pub fn supported_devices_for_group_request(&self, group_id: impl ToString) -> RequestSpec {
+        self.requests().supported_devices_for_group(group_id)
+    }
+
+    pub fn connect_request(&self, request: &CloudBleConnectRequest) -> RequestSpec {
+        self.requests().connect(request)
+    }
+
+    pub fn poll_request(&self, request: &CloudBlePollRequest) -> RequestSpec {
+        self.requests().poll(request)
+    }
+
+    pub fn control_device_request(&self, request: &CloudBleControlRequest) -> RequestSpec {
+        self.requests().control_device(request)
+    }
+}
+
+#[cfg(feature = "async")]
+impl<T> AsyncCloudBleClient<'_, T>
+where
+    T: AsyncTransport,
+{
+    pub async fn supported_devices(&self) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_request())
+            .await?;
+        Ok(response.into())
+    }
+
+    pub async fn supported_devices_for_group(
+        &self,
+        group_id: impl ToString,
+    ) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_for_group_request(group_id))
+            .await?;
+        Ok(response.into())
+    }
+
+    pub async fn connect(
+        &self,
+        request: &CloudBleConnectRequest,
+    ) -> Result<CloudBleConnection, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.connect_request(request))
+            .await
+    }
+
+    pub async fn poll(
+        &self,
+        request: &CloudBlePollRequest,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        self.client.execute_typed(self.poll_request(request)).await
+    }
+
+    pub async fn control_device(
+        &self,
+        request: &CloudBleControlRequest,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.control_device_request(request))
+            .await
+    }
+
+    pub async fn execute_fountain(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(device_id, metadata, command)
+            .await
+    }
+
+    pub async fn execute_fountain_with_settings(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(device_id, metadata, command)
+            .await
+    }
+
+    async fn execute_fountain_command(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        command: petkit_protocol::BleFrameCommand,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let device_id = device_id.to_string();
+        let connect = CloudBleConnectRequest::from_metadata(metadata, device_id.clone())?;
+        self.connect(&connect).await?;
+        let poll_state = self.poll(&connect).await?;
+        if !matches!(poll_state, CloudBlePollState::Connected) {
+            return Err(PetkitError::InvalidResponse("cloud BLE relay did not connect").into());
+        }
+        let request = CloudBleControlRequest::from_metadata(
+            metadata,
+            device_id,
+            command.cmd.to_string(),
+            command.data,
+        );
+        self.control_device(&request).await
+    }
+}
+
+#[cfg(feature = "blocking")]
+#[derive(Debug)]
+pub struct BlockingCloudBleClient<'a, T> {
+    client: &'a BlockingPetkitClient<T>,
+}
+
+#[cfg(feature = "blocking")]
+impl<T> BlockingCloudBleClient<'_, T> {
+    pub fn requests(&self) -> CloudBleScope {
+        self.client.auth.cloud_ble()
+    }
+
+    pub fn supported_devices_request(&self) -> RequestSpec {
+        self.requests().supported_devices()
+    }
+
+    pub fn supported_devices_for_group_request(&self, group_id: impl ToString) -> RequestSpec {
+        self.requests().supported_devices_for_group(group_id)
+    }
+
+    pub fn connect_request(&self, request: &CloudBleConnectRequest) -> RequestSpec {
+        self.requests().connect(request)
+    }
+
+    pub fn poll_request(&self, request: &CloudBlePollRequest) -> RequestSpec {
+        self.requests().poll(request)
+    }
+
+    pub fn control_device_request(&self, request: &CloudBleControlRequest) -> RequestSpec {
+        self.requests().control_device(request)
+    }
+}
+
+#[cfg(feature = "blocking")]
+impl<T> BlockingCloudBleClient<'_, T>
+where
+    T: BlockingTransport,
+{
+    pub fn supported_devices(&self) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_request())?;
+        Ok(response.into())
+    }
+
+    pub fn supported_devices_for_group(
+        &self,
+        group_id: impl ToString,
+    ) -> Result<Vec<CloudBleDevice>, ClientError<T::Error>> {
+        let response: CloudBleDevicesResponse = self
+            .client
+            .execute_typed(self.supported_devices_for_group_request(group_id))?;
+        Ok(response.into())
+    }
+
+    pub fn connect(
+        &self,
+        request: &CloudBleConnectRequest,
+    ) -> Result<CloudBleConnection, ClientError<T::Error>> {
+        self.client.execute_typed(self.connect_request(request))
+    }
+
+    pub fn poll(
+        &self,
+        request: &CloudBlePollRequest,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        self.client.execute_typed(self.poll_request(request))
+    }
+
+    pub fn control_device(
+        &self,
+        request: &CloudBleControlRequest,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        self.client
+            .execute_typed(self.control_device_request(request))
+    }
+
+    pub fn execute_fountain(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(device_id, metadata, command)
+    }
+
+    pub fn execute_fountain_with_settings(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(device_id, metadata, command)
+    }
+
+    fn execute_fountain_command(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        command: petkit_protocol::BleFrameCommand,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let device_id = device_id.to_string();
+        let connect = CloudBleConnectRequest::from_metadata(metadata, device_id.clone())?;
+        self.connect(&connect)?;
+        let poll_state = self.poll(&connect)?;
+        if !matches!(poll_state, CloudBlePollState::Connected) {
+            return Err(PetkitError::InvalidResponse("cloud BLE relay did not connect").into());
+        }
+        let request = CloudBleControlRequest::from_metadata(
+            metadata,
+            device_id,
+            command.cmd.to_string(),
+            command.data,
+        );
+        self.control_device(&request)
     }
 }
 
@@ -946,6 +1278,10 @@ where
         self.client.execute_typed(self.start_live_request()).await
     }
 
+    pub async fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live().await
+    }
+
     pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.cloud_video_request()).await
     }
@@ -1186,6 +1522,10 @@ where
         self.client.execute_typed(self.start_live_request())
     }
 
+    pub fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live()
+    }
+
     pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.cloud_video_request())
     }
@@ -1329,6 +1669,10 @@ where
         self.client.execute_typed(self.start_live_request()).await
     }
 
+    pub async fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live().await
+    }
+
     pub async fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.cloud_video_request()).await
     }
@@ -1462,6 +1806,10 @@ where
 
     pub fn start_live(&self) -> Result<LitterStartLiveResponse, ClientError<T::Error>> {
         self.client.execute_typed(self.start_live_request())
+    }
+
+    pub fn camera_live_feed(&self) -> Result<CameraLiveFeed, ClientError<T::Error>> {
+        self.start_live()
     }
 
     pub fn cloud_video(&self) -> Result<CloudVideoResponse, ClientError<T::Error>> {
@@ -2057,6 +2405,7 @@ pub mod reqwest_async {
                 headers,
                 query,
                 form_fields,
+                body,
             } = request;
 
             async move {
@@ -2070,7 +2419,11 @@ pub mod reqwest_async {
                     builder = builder.query(&query_pairs);
                 }
 
-                if !form_fields.is_empty() {
+                if let Some(body) = body {
+                    builder = builder
+                        .header("Content-Type", body.content_type.as_ref())
+                        .body(body.body);
+                } else if !form_fields.is_empty() {
                     let form_pairs = form_fields
                         .iter()
                         .map(|field| (field.name.as_ref(), field.value.as_str()))
@@ -2132,6 +2485,7 @@ pub mod reqwest_blocking {
                 headers,
                 query,
                 form_fields,
+                body,
             } = request;
             let mut builder = self.client.request(request_method(method), url);
 
@@ -2143,7 +2497,11 @@ pub mod reqwest_blocking {
                 builder = builder.query(&query_pairs);
             }
 
-            if !form_fields.is_empty() {
+            if let Some(body) = body {
+                builder = builder
+                    .header("Content-Type", body.content_type.as_ref())
+                    .body(body.body);
+            } else if !form_fields.is_empty() {
                 let form_pairs = form_fields
                     .iter()
                     .map(|field| (field.name.as_ref(), field.value.as_str()))
@@ -2245,6 +2603,7 @@ pub mod ureq_blocking {
                 headers,
                 query,
                 form_fields,
+                body,
             } = request;
 
             let mut builder = match method {
@@ -2262,7 +2621,11 @@ pub mod ureq_blocking {
             let response = match method {
                 HttpMethod::Get => builder.call(),
                 HttpMethod::Post => {
-                    if form_fields.is_empty() {
+                    if let Some(body) = body {
+                        builder
+                            .set("Content-Type", body.content_type.as_ref())
+                            .send_string(&body.body)
+                    } else if form_fields.is_empty() {
                         builder.send_string("")
                     } else {
                         let pairs = form_fields
@@ -2486,7 +2849,7 @@ mod tests {
             response: ResponseParts::new(
                 200,
                 vec![],
-                br#"{"result":{"session":{"id":"s1","userId":"u1","expiresIn":3600,"region":"de","createdAt":"2026-05-27T00:00:00.000+0000","refreshedAt":null}}}"#.to_vec(),
+                br#"{"result":{"apiServers":["https://api.petkt.com/6/"],"session":{"id":"s1","userId":"u1","expiresIn":3600,"region":"de","createdAt":"2026-05-27T00:00:00.000+0000","refreshedAt":null}}}"#.to_vec(),
             ),
         };
         let mut client = BlockingPetkitClient::new(ctx(), regional(), transport);
@@ -2506,6 +2869,10 @@ mod tests {
         assert_eq!(request.path, "user/login");
         // After login, the session id is persisted on the client.
         assert_eq!(client.authenticated().session_id(), "s1");
+        assert_eq!(
+            client.authenticated().protocol().family_list().url,
+            "https://api.petkt.com/6/group/family/list"
+        );
     }
 
     #[cfg(feature = "blocking")]
@@ -2790,6 +3157,8 @@ mod tests {
             device_name: Some(String::from("feeder")),
             device_type: DeviceType::D4s,
             group_id: 1,
+            mac: None,
+            ble_id: None,
             device_type_id: Some(10),
             type_code: Some(20),
             unique_id: String::from("u-42"),

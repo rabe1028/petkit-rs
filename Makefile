@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check clippy test test-no-std feature-matrix shellcheck shfmt shfmt-check actionlint doc quality deny machete typos msrv minimal-versions ci-quality ci-msrv ci-minimal-versions mutants-list mutants-check mutants-focus fuzz-check actions-local-quality actions-local-msrv actions-local-minimal-versions actions-local-mutants actions-local-fuzz
+.PHONY: fmt fmt-check clippy test test-no-std feature-matrix shellcheck shfmt shfmt-check actionlint doc quality deny machete typos msrv minimal-versions ci-quality ci-msrv ci-minimal-versions mutants-list mutants-check mutants-focus fuzz-check petkit-live-smoke actions-local-quality actions-local-msrv actions-local-minimal-versions actions-local-mutants actions-local-fuzz
 
 ACTRUN := sh scripts/actrun.sh
 MISE := mise exec --
@@ -75,6 +75,9 @@ fuzz-check:
 	cd fuzz && $(MISE) cargo fuzz check api_response
 	cd fuzz && $(MISE) cargo fuzz check base_url_join
 	cd fuzz && $(MISE) cargo fuzz check ble_frame
+
+petkit-live-smoke:
+	sh scripts/petkit-live-smoke.sh
 
 actions-local-quality:
 	$(ACTRUN) workflow run .github/workflows/quality.yml --job verify --trigger pull_request --local --include-dirty

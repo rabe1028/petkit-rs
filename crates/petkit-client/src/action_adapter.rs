@@ -1,7 +1,7 @@
 use petkit_types::{
-    CustomSetting, CustomSettingValue, FeederSetting, FeederSurplusGrams, FountainAction,
-    LbCommand, LitterControl, LitterModeValue, LitterWorkMode, PetkitError, PurifierControl,
-    PurifierMode, SettingInt, SettingString, SoundId,
+    CameraRtmCommand, CustomSetting, CustomSettingValue, FeederSetting, FeederSurplusGrams,
+    FountainAction, LbCommand, LitterControl, LitterModeValue, LitterWorkMode, PetkitError,
+    PtzDirection, PtzKind, PurifierControl, PurifierMode, SettingInt, SettingString, SoundId,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,6 +23,7 @@ pub enum ParsedAction {
     LitterResetN50Deodorizer,
     PurifierControl(PurifierControl),
     Fountain(FountainAction),
+    CameraRtm(CameraRtmCommand),
     /// Family dispatch is intentionally left to the caller because Petkit has
     /// separate update-setting endpoints for feeder, litter, purifier, etc.
     UpdateSetting(CustomSetting),
@@ -59,9 +60,15 @@ pub fn parse_action(action: &str, args: &[(&str, &str)]) -> Result<ParsedAction,
             )?)?),
         )),
         "update_setting" => Ok(ParsedAction::UpdateSetting(parse_custom_setting(args)?)),
-        "camera_ptz" => Err(PetkitError::InvalidArgument(String::from(
-            "`camera_ptz` is an Agora/RTM action and is intentionally outside the HTTP action adapter",
-        ))),
+        "camera_ptz" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::PtzControl {
+            kind: PtzKind::Move,
+            direction: parse_ptz_direction(args)?,
+        })),
+        "camera_heartbeat" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::Heartbeat)),
+        "camera_start_live" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::StartLive {
+            is_sd: parse_optional_bool(args, "is_sd")?.unwrap_or(false),
+        })),
+        "camera_stop_live" => Ok(ParsedAction::CameraRtm(CameraRtmCommand::StopLive)),
         "litterbox_clean" | "scoop" => {
             Ok(ParsedAction::LitterControl(LitterControl::StartCleaning))
         }
@@ -382,6 +389,18 @@ fn parse_bool(args: &[(&str, &str)], key: &'static str) -> Result<bool, PetkitEr
         .map_err(|_| PetkitError::InvalidArgument(format!("Petkit action `{key}` must be boolean")))
 }
 
+fn parse_optional_bool(
+    args: &[(&str, &str)],
+    key: &'static str,
+) -> Result<Option<bool>, PetkitError> {
+    let Some(value) = arg(args, key) else {
+        return Ok(None);
+    };
+    parse_bool_value(value)
+        .map(Some)
+        .map_err(|_| PetkitError::InvalidArgument(format!("Petkit action `{key}` must be boolean")))
+}
+
 fn parse_bool_value(value: &str) -> Result<bool, PetkitError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "on" | "yes" => Ok(true),
@@ -406,6 +425,27 @@ fn parse_purifier_mode(
         _ => Err(PetkitError::InvalidArgument(format!(
             "unsupported purifier mode `{value}`"
         ))),
+    }
+}
+
+fn parse_ptz_direction(args: &[(&str, &str)]) -> Result<PtzDirection, PetkitError> {
+    let value = arg_any(args, &["direction", "ptz_dir", "dir"]).ok_or_else(|| {
+        PetkitError::InvalidArgument(String::from("camera_ptz requires direction"))
+    })?;
+    match normalize_action(value).as_str() {
+        "up" => Ok(PtzDirection::Up),
+        "down" => Ok(PtzDirection::Down),
+        "left" => Ok(PtzDirection::Left),
+        "right" => Ok(PtzDirection::Right),
+        "stop" => Ok(PtzDirection::Stop),
+        raw => raw
+            .parse::<i64>()
+            .map(PtzDirection::Custom)
+            .map_err(|error| {
+                PetkitError::InvalidArgument(format!(
+                    "unsupported camera_ptz direction `{value}`: {error}"
+                ))
+            }),
     }
 }
 
@@ -533,8 +573,14 @@ mod tests {
     }
 
     #[test]
-    fn documents_camera_ptz_as_out_of_scope() {
-        assert!(parse_action("camera_ptz", &[("direction", "left")]).is_err());
+    fn parses_camera_ptz_as_rtm_command() {
+        assert_eq!(
+            parse_action("camera_ptz", &[("direction", "left")]).expect("camera ptz should parse"),
+            ParsedAction::CameraRtm(CameraRtmCommand::PtzControl {
+                kind: PtzKind::Move,
+                direction: PtzDirection::Left
+            })
+        );
     }
 
     #[test]
