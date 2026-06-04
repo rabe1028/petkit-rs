@@ -2,6 +2,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use core::time::Duration;
+
 use nojson::{JsonParseError, JsonValueKind, RawJsonValue};
 
 use crate::{DeviceDetailResponse, DeviceSummary, PetkitError};
@@ -12,6 +14,30 @@ pub struct CloudBleMetadata {
     pub mac: String,
     pub group_id: Option<String>,
     pub ble_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloudBleRelayOptions {
+    pub poll_interval: Duration,
+    pub max_polls: u8,
+}
+
+impl CloudBleRelayOptions {
+    pub const fn new(poll_interval: Duration, max_polls: u8) -> Self {
+        Self {
+            poll_interval,
+            max_polls,
+        }
+    }
+}
+
+impl Default for CloudBleRelayOptions {
+    fn default() -> Self {
+        Self {
+            poll_interval: Duration::from_secs(4),
+            max_polls: 8,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

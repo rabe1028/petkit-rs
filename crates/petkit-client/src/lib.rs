@@ -8,12 +8,13 @@ use md5::{Digest, Md5};
 use nojson::{JsonParseError, RawJsonValue};
 #[cfg(any(feature = "async", feature = "blocking"))]
 use petkit_protocol::{
-    AuthenticatedProtocol, BaseUrl, CloudBleScope, DynamicFeeder, DynamicLitter, FeederModel,
-    FeederScope, FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
+    AuthenticatedProtocol, BaseUrl, CAMERA_RTM_FALLBACK_BASE_URL, CAMERA_RTM_PRIMARY_BASE_URL,
+    CloudBleScope, DynamicFeeder, DynamicLitter, FeederModel, FeederScope,
+    FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
     FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope, LitterModel, LitterScope,
     LitterSupportsCamera, LitterSupportsN50Deodorizer, ManualFeedAmount, PetScope, PublicProtocol,
-    PurifierScope, RequestSpec, ResponseParts, camera_rtm_peer_message, parse_api_response,
-    parse_json_response,
+    PurifierScope, RequestSpec, ResponseParts, camera_rtm_peer_message_for_base,
+    parse_api_response, parse_json_response,
 };
 use petkit_types::PetkitError;
 #[cfg(any(feature = "async", feature = "blocking"))]
@@ -21,16 +22,16 @@ use petkit_types::{
     AccountGroup, AgoraRtmResponse, CalibrationAction, CameraLiveFeed, CameraRtmCommand,
     ClientContext, CloudBleConnectRequest, CloudBleConnection, CloudBleControlRequest,
     CloudBleControlResponse, CloudBleDevice, CloudBleDevicesResponse, CloudBleMetadata,
-    CloudBlePollRequest, CloudBlePollState, CloudVideoResponse, DeviceCatalog, DeviceFamilyKind,
-    DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList, FeedEntryId, FeedIdentifier,
-    FeederCalibrationResponse, FeederCallPetResponse, FeederCancelManualFeedResponse,
-    FeederDeviceDetailResponse, FeederDeviceType, FeederFoodReplenishedResponse,
-    FeederManualFeedResponse, FeederOpenCameraResponse, FeederPlaySoundResponse,
-    FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse, FeederRestoreDailyFeedResponse,
-    FeederRestoreFeedResponse, FeederSaveFeedResponse, FeederSaveRepeatsResponse,
-    FeederScheduleCompleteResponse, FeederScheduleRemoveResponse, FeederScheduleSaveResponse,
-    FeederSetting, FeederStartLiveResponse, FeederSuspendFeedResponse, FeederUpdateSettingResponse,
-    FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
+    CloudBlePollRequest, CloudBlePollState, CloudBleRelayOptions, CloudVideoResponse,
+    DeviceCatalog, DeviceFamilyKind, DeviceId, DeviceSummary, FamilyListResponse, FeedDailyList,
+    FeedEntryId, FeedIdentifier, FeederCalibrationResponse, FeederCallPetResponse,
+    FeederCancelManualFeedResponse, FeederDeviceDetailResponse, FeederDeviceType,
+    FeederFoodReplenishedResponse, FeederManualFeedResponse, FeederOpenCameraResponse,
+    FeederPlaySoundResponse, FeederRemoveDailyFeedResponse, FeederResetDesiccantResponse,
+    FeederRestoreDailyFeedResponse, FeederRestoreFeedResponse, FeederSaveFeedResponse,
+    FeederSaveRepeatsResponse, FeederScheduleCompleteResponse, FeederScheduleRemoveResponse,
+    FeederScheduleSaveResponse, FeederSetting, FeederStartLiveResponse, FeederSuspendFeedResponse,
+    FeederUpdateSettingResponse, FountainDeviceDetailResponse, FountainDeviceType, FountainSetting,
     FountainUpdateSettingResponse, GetDownloadM3u8Response, GetM3u8Response, IotConfigSet,
     IotDeviceInfoV1Response, IotDeviceInfoV2Response, LitterControl, LitterControlDeviceResponse,
     LitterDeviceDetailResponse, LitterDeviceType, LitterOpenCameraResponse,
@@ -600,8 +601,62 @@ where
         live_feed: &CameraLiveFeed,
         command: CameraRtmCommand,
     ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
-        self.client
-            .execute_json_typed(camera_rtm_peer_message(live_feed, &command)?)
+        let primary = self
+            .client
+            .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                CAMERA_RTM_PRIMARY_BASE_URL,
+                live_feed,
+                &command,
+            )?)
+            .await;
+        if let Ok(response) = &primary
+            && response.accepted_for(&command)
+        {
+            return primary;
+        }
+        let fallback = self
+            .client
+            .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                CAMERA_RTM_FALLBACK_BASE_URL,
+                live_feed,
+                &command,
+            )?)
+            .await;
+        match fallback {
+            Ok(response) if response.accepted_for(&command) => Ok(response),
+            Ok(response) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Ok(response),
+            },
+            Err(error) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Err(error),
+            },
+        }
+    }
+
+    pub async fn start_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+        is_sd: bool,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StartLive { is_sd })
+            .await
+    }
+
+    pub async fn stop_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StopLive)
+            .await
+    }
+
+    pub async fn send_camera_rtm_heartbeat(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::Heartbeat)
             .await
     }
 }
@@ -764,8 +819,58 @@ where
         live_feed: &CameraLiveFeed,
         command: CameraRtmCommand,
     ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
-        self.client
-            .execute_json_typed(camera_rtm_peer_message(live_feed, &command)?)
+        let primary =
+            self.client
+                .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                    CAMERA_RTM_PRIMARY_BASE_URL,
+                    live_feed,
+                    &command,
+                )?);
+        if let Ok(response) = &primary
+            && response.accepted_for(&command)
+        {
+            return primary;
+        }
+        let fallback =
+            self.client
+                .execute_json_typed::<AgoraRtmResponse>(camera_rtm_peer_message_for_base(
+                    CAMERA_RTM_FALLBACK_BASE_URL,
+                    live_feed,
+                    &command,
+                )?);
+        match fallback {
+            Ok(response) if response.accepted_for(&command) => Ok(response),
+            Ok(response) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Ok(response),
+            },
+            Err(error) => match primary {
+                Ok(primary) => Ok(primary),
+                Err(_) => Err(error),
+            },
+        }
+    }
+
+    pub fn start_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+        is_sd: bool,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StartLive { is_sd })
+    }
+
+    pub fn stop_camera_rtm_live(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::StopLive)
+    }
+
+    pub fn send_camera_rtm_heartbeat(
+        &self,
+        live_feed: &CameraLiveFeed,
+    ) -> Result<AgoraRtmResponse, ClientError<T::Error>> {
+        self.send_camera_rtm_command(live_feed, CameraRtmCommand::Heartbeat)
     }
 }
 
@@ -851,6 +956,24 @@ where
             .await
     }
 
+    pub async fn resolve_cloud_ble_metadata(
+        &self,
+        device: &DeviceSummary,
+    ) -> Result<Option<CloudBleMetadata>, ClientError<T::Error>> {
+        if let Some(metadata) = device.cloud_ble_metadata() {
+            return Ok(Some(metadata));
+        }
+        let detail_metadata = match self.client.authenticated().device_detail_for(device).await {
+            Ok(detail) => discovered_cloud_ble_metadata(detail),
+            Err(_) => None,
+        };
+        if detail_metadata.is_some() {
+            return Ok(detail_metadata);
+        }
+        let relays = self.supported_devices_for_group(device.group_id).await?;
+        Ok(match_cloud_ble_metadata(device, &relays))
+    }
+
     pub async fn execute_fountain(
         &self,
         device_id: impl ToString,
@@ -860,8 +983,13 @@ where
         counter: u8,
     ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
         let command = fountain.command(action, counter)?;
-        self.execute_fountain_command(device_id, metadata, command)
-            .await
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+        .await
     }
 
     pub async fn execute_fountain_with_settings(
@@ -874,7 +1002,41 @@ where
         settings: &FountainBleSettings,
     ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
         let command = fountain.command_with_settings(action, counter, settings)?;
-        self.execute_fountain_command(device_id, metadata, command)
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn execute_fountain_with_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
+            .await
+    }
+
+    pub async fn execute_fountain_with_settings_and_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
             .await
     }
 
@@ -883,11 +1045,12 @@ where
         device_id: impl ToString,
         metadata: &CloudBleMetadata,
         command: petkit_protocol::BleFrameCommand,
+        options: CloudBleRelayOptions,
     ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
         let device_id = device_id.to_string();
         let connect = CloudBleConnectRequest::from_metadata(metadata, device_id.clone())?;
         self.connect(&connect).await?;
-        let poll_state = self.poll(&connect).await?;
+        let poll_state = self.poll_until_connected(&connect, options).await?;
         if !matches!(poll_state, CloudBlePollState::Connected) {
             return Err(PetkitError::InvalidResponse("cloud BLE relay did not connect").into());
         }
@@ -898,6 +1061,25 @@ where
             command.data,
         );
         self.control_device(&request).await
+    }
+
+    async fn poll_until_connected(
+        &self,
+        request: &CloudBlePollRequest,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        let max_polls = options.max_polls.max(1);
+        let mut last_state = CloudBlePollState::NotConnected;
+        for _ in 0..max_polls {
+            last_state = self.poll(request).await?;
+            if matches!(
+                last_state,
+                CloudBlePollState::Connected | CloudBlePollState::Failed
+            ) {
+                break;
+            }
+        }
+        Ok(last_state)
     }
 }
 
@@ -978,6 +1160,24 @@ where
             .execute_typed(self.control_device_request(request))
     }
 
+    pub fn resolve_cloud_ble_metadata(
+        &self,
+        device: &DeviceSummary,
+    ) -> Result<Option<CloudBleMetadata>, ClientError<T::Error>> {
+        if let Some(metadata) = device.cloud_ble_metadata() {
+            return Ok(Some(metadata));
+        }
+        let detail_metadata = match self.client.authenticated().device_detail_for(device) {
+            Ok(detail) => discovered_cloud_ble_metadata(detail),
+            Err(_) => None,
+        };
+        if detail_metadata.is_some() {
+            return Ok(detail_metadata);
+        }
+        let relays = self.supported_devices_for_group(device.group_id)?;
+        Ok(match_cloud_ble_metadata(device, &relays))
+    }
+
     pub fn execute_fountain(
         &self,
         device_id: impl ToString,
@@ -987,7 +1187,12 @@ where
         counter: u8,
     ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
         let command = fountain.command(action, counter)?;
-        self.execute_fountain_command(device_id, metadata, command)
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
     }
 
     pub fn execute_fountain_with_settings(
@@ -1000,7 +1205,39 @@ where
         settings: &FountainBleSettings,
     ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
         let command = fountain.command_with_settings(action, counter, settings)?;
-        self.execute_fountain_command(device_id, metadata, command)
+        self.execute_fountain_command(
+            device_id,
+            metadata,
+            command,
+            CloudBleRelayOptions::default(),
+        )
+    }
+
+    pub fn execute_fountain_with_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command(action, counter)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
+    }
+
+    pub fn execute_fountain_with_settings_and_options(
+        &self,
+        device_id: impl ToString,
+        metadata: &CloudBleMetadata,
+        fountain: FountainBleClient,
+        action: petkit_types::FountainAction,
+        counter: u8,
+        settings: &FountainBleSettings,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
+        let command = fountain.command_with_settings(action, counter, settings)?;
+        self.execute_fountain_command(device_id, metadata, command, options)
     }
 
     fn execute_fountain_command(
@@ -1008,11 +1245,12 @@ where
         device_id: impl ToString,
         metadata: &CloudBleMetadata,
         command: petkit_protocol::BleFrameCommand,
+        options: CloudBleRelayOptions,
     ) -> Result<CloudBleControlResponse, ClientError<T::Error>> {
         let device_id = device_id.to_string();
         let connect = CloudBleConnectRequest::from_metadata(metadata, device_id.clone())?;
         self.connect(&connect)?;
-        let poll_state = self.poll(&connect)?;
+        let poll_state = self.poll_until_connected(&connect, options)?;
         if !matches!(poll_state, CloudBlePollState::Connected) {
             return Err(PetkitError::InvalidResponse("cloud BLE relay did not connect").into());
         }
@@ -1024,6 +1262,82 @@ where
         );
         self.control_device(&request)
     }
+
+    fn poll_until_connected(
+        &self,
+        request: &CloudBlePollRequest,
+        options: CloudBleRelayOptions,
+    ) -> Result<CloudBlePollState, ClientError<T::Error>> {
+        let max_polls = options.max_polls.max(1);
+        let mut last_state = CloudBlePollState::NotConnected;
+        for poll_index in 0..max_polls {
+            last_state = self.poll(request)?;
+            if matches!(
+                last_state,
+                CloudBlePollState::Connected | CloudBlePollState::Failed
+            ) {
+                break;
+            }
+            if poll_index + 1 < max_polls && !options.poll_interval.is_zero() {
+                std::thread::sleep(options.poll_interval);
+            }
+        }
+        Ok(last_state)
+    }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn discovered_cloud_ble_metadata(detail: DiscoveredDeviceDetail) -> Option<CloudBleMetadata> {
+    match detail {
+        DiscoveredDeviceDetail::Feeder(response) => response.cloud_ble_metadata(),
+        DiscoveredDeviceDetail::Litter(response) => response.cloud_ble_metadata(),
+        DiscoveredDeviceDetail::Fountain(response) => response.cloud_ble_metadata(),
+        DiscoveredDeviceDetail::Purifier(response) => response.cloud_ble_metadata(),
+    }
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn match_cloud_ble_metadata(
+    device: &DeviceSummary,
+    relays: &[CloudBleDevice],
+) -> Option<CloudBleMetadata> {
+    let relay = relays
+        .iter()
+        .find(|relay| cloud_ble_relay_matches_identity(device, relay))
+        .or_else(|| {
+            let matches = relays
+                .iter()
+                .filter(|relay| cloud_ble_relay_matches_type(device, relay))
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then_some(matches[0])
+        })
+        .or_else(|| (relays.len() == 1).then_some(&relays[0]))?;
+    Some(CloudBleMetadata {
+        device_type: device.device_type.as_str().to_string(),
+        mac: relay.mac.clone(),
+        group_id: Some(device.group_id.to_string()),
+        ble_id: device.ble_id.clone().or_else(|| Some(relay.id.clone())),
+    })
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn cloud_ble_relay_matches_identity(device: &DeviceSummary, relay: &CloudBleDevice) -> bool {
+    let device_id = device.device_id.to_string();
+    device.ble_id.as_deref() == Some(relay.id.as_str())
+        || device_id == relay.id
+        || device.unique_id == relay.id
+        || device
+            .device_name
+            .as_deref()
+            .zip(relay.name.as_deref())
+            .is_some_and(|(left, right)| left.trim().eq_ignore_ascii_case(right.trim()))
+}
+
+#[cfg(any(feature = "async", feature = "blocking"))]
+fn cloud_ble_relay_matches_type(device: &DeviceSummary, relay: &CloudBleDevice) -> bool {
+    relay.type_id.is_some_and(|type_id| {
+        device.device_type_id == Some(type_id) || device.type_code == Some(type_id)
+    })
 }
 
 #[cfg(feature = "async")]
@@ -2682,21 +2996,21 @@ mod tests {
     #[cfg(feature = "async")]
     use petkit_types::IotConfigSet;
     use petkit_types::{
-        ClientContext, ClientProfile, DeviceId, DeviceSummary, DeviceType, FountainAction,
-        FountainDeviceType,
+        ClientContext, ClientProfile, CloudBleDevice, DeviceId, DeviceSummary, DeviceType,
+        FountainAction, FountainDeviceType,
     };
 
     #[cfg(feature = "blocking")]
     use super::FountainBleSettings;
     #[cfg(feature = "blocking")]
     use super::blocking_host_callback::BlockingHostCallbackTransport;
-    use super::hash_password_md5;
     #[cfg(feature = "async")]
     use super::host_callback::HostCallbackTransport;
     #[cfg(feature = "async")]
     use super::{AsyncPetkitClient, AsyncTransport, DiscoveredDeviceDetail};
     #[cfg(feature = "blocking")]
     use super::{BlockingPetkitClient, BlockingTransport};
+    use super::{hash_password_md5, match_cloud_ble_metadata};
     #[cfg(feature = "blocking")]
     use secrecy::ExposeSecret;
 
@@ -3176,6 +3490,38 @@ mod tests {
             .clone()
             .expect("detail request should be captured");
         assert_eq!(request.path, "d4s/device_detail");
+    }
+
+    #[test]
+    fn cloud_ble_metadata_can_be_matched_from_relay_type() {
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::W5,
+            group_id: 7,
+            mac: None,
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("w5-42"),
+        };
+        let relays = [CloudBleDevice {
+            id: String::from("ble-42"),
+            mac: String::from("aa:bb"),
+            name: Some(String::from("relay")),
+            sn: None,
+            pim: None,
+            type_id: Some(14),
+            low_version: None,
+        }];
+
+        let metadata =
+            match_cloud_ble_metadata(&summary, &relays).expect("relay should match summary");
+
+        assert_eq!(metadata.device_type, "w5");
+        assert_eq!(metadata.mac, "aa:bb");
+        assert_eq!(metadata.group_id.as_deref(), Some("7"));
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
     }
 
     #[cfg(feature = "async")]

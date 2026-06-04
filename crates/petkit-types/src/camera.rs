@@ -76,16 +76,32 @@ impl CameraRtmCommand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgoraRtmResponse {
     pub accepted: bool,
+    pub result: Option<String>,
+    pub code: Option<String>,
     pub request_id: Option<String>,
     pub message_id: Option<String>,
+}
+
+impl AgoraRtmResponse {
+    pub fn accepted_for(&self, command: &CameraRtmCommand) -> bool {
+        self.accepted
+            || matches!(
+                (command, self.code.as_deref()),
+                (CameraRtmCommand::StopLive, Some("message_offline"))
+            )
+    }
 }
 
 impl<'text, 'raw> TryFrom<RawJsonValue<'text, 'raw>> for AgoraRtmResponse {
     type Error = JsonParseError;
 
     fn try_from(value: RawJsonValue<'text, 'raw>) -> Result<Self, Self::Error> {
+        let result = optional_string_any(value, &["result"])?;
+        let code = optional_string_any(value, &["code"])?;
         Ok(Self {
-            accepted: agora_truthy(value)?,
+            accepted: agora_truthy(value, result.as_deref(), code.as_deref())?,
+            result,
+            code,
             request_id: optional_string_any(value, &["request_id", "requestId"])?,
             message_id: optional_string_any(value, &["message_id", "messageId"])?,
         })
@@ -127,7 +143,20 @@ fn optional_string_any(
     Ok(None)
 }
 
-fn agora_truthy(value: RawJsonValue<'_, '_>) -> Result<bool, JsonParseError> {
+fn agora_truthy(
+    value: RawJsonValue<'_, '_>,
+    result: Option<&str>,
+    code: Option<&str>,
+) -> Result<bool, JsonParseError> {
+    if matches!(result, Some("success")) {
+        return Ok(true);
+    }
+    if matches!(code, Some("message_sent" | "message_delivered")) {
+        return Ok(true);
+    }
+    if code.is_some() {
+        return Ok(false);
+    }
     match value.kind() {
         JsonValueKind::Boolean => bool::try_from(value),
         JsonValueKind::Integer | JsonValueKind::Float => Ok(i64::try_from(value)? != 0),
@@ -145,5 +174,38 @@ fn agora_truthy(value: RawJsonValue<'_, '_>) -> Result<bool, JsonParseError> {
             Ok(true)
         }
         JsonValueKind::Array | JsonValueKind::Null => Ok(false),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use nojson::RawJson;
+
+    use super::*;
+
+    #[test]
+    fn agora_rtm_response_accepts_string_result_and_codes() {
+        let raw = RawJson::parse(r#"{"result":"success","request_id":"req"}"#)
+            .expect("fixture should parse");
+        let response = AgoraRtmResponse::try_from(raw.value()).expect("response should parse");
+        assert!(response.accepted);
+        assert_eq!(response.result.as_deref(), Some("success"));
+
+        let raw = RawJson::parse(r#"{"code":"message_delivered","message_id":"msg"}"#)
+            .expect("fixture should parse");
+        let response = AgoraRtmResponse::try_from(raw.value()).expect("response should parse");
+        assert!(response.accepted);
+        assert_eq!(response.code.as_deref(), Some("message_delivered"));
+    }
+
+    #[test]
+    fn agora_rtm_response_accepts_offline_for_stop_live() {
+        let raw = RawJson::parse(r#"{"code":"message_offline"}"#).expect("fixture should parse");
+        let response = AgoraRtmResponse::try_from(raw.value()).expect("response should parse");
+
+        assert!(!response.accepted);
+        assert!(response.accepted_for(&CameraRtmCommand::StopLive));
+        assert!(!response.accepted_for(&CameraRtmCommand::Heartbeat));
     }
 }

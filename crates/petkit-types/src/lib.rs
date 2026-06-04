@@ -22,7 +22,7 @@ pub use client::{ClientContext, ClientProfile};
 pub use cloud_ble::{
     CloudBleConnectRequest, CloudBleConnection, CloudBleControlRequest, CloudBleControlResponse,
     CloudBleDevice, CloudBleDevicesResponse, CloudBleMetadata, CloudBlePollRequest,
-    CloudBlePollState,
+    CloudBlePollState, CloudBleRelayOptions,
 };
 pub use command::{
     DeviceAction, DeviceCommand, FeederCommand, FountainAction, LbCommand, LitterCommand,

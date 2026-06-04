@@ -16,14 +16,15 @@ pub use ble::{
     write_fountain_ble_frame_with_settings,
 };
 pub use protocol::{
-    AuthenticatedProtocol, CloudBleScope, D3Feeder, D4Feeder, D4hFeeder, D4sFeeder, D4shFeeder,
-    DualHopperFeederModel, DualManualFeedAmount, DynamicFeeder, DynamicLitter, FeederMiniFeeder,
-    FeederModel, FeederScope, FeederSupportsCalibration, FeederSupportsCallPet,
-    FeederSupportsCamera, FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope,
-    FreshElementFeeder, LitterModel, LitterScope, LitterSupportsCamera,
-    LitterSupportsN50Deodorizer, ManualFeedAmount, PetScope, PublicProtocol, PurifierScope,
-    SingleHopperFeederModel, SingleManualFeedAmount, T3Litter, T4Litter, T5Litter, T6Litter,
-    T7Litter, camera_rtm_peer_message,
+    AuthenticatedProtocol, CAMERA_RTM_FALLBACK_BASE_URL, CAMERA_RTM_PRIMARY_BASE_URL,
+    CloudBleScope, D3Feeder, D4Feeder, D4hFeeder, D4sFeeder, D4shFeeder, DualHopperFeederModel,
+    DualManualFeedAmount, DynamicFeeder, DynamicLitter, FeederMiniFeeder, FeederModel, FeederScope,
+    FeederSupportsCalibration, FeederSupportsCallPet, FeederSupportsCamera,
+    FeederSupportsFoodReplenished, FeederSupportsSound, FountainScope, FreshElementFeeder,
+    LitterModel, LitterScope, LitterSupportsCamera, LitterSupportsN50Deodorizer, ManualFeedAmount,
+    PetScope, PublicProtocol, PurifierScope, SingleHopperFeederModel, SingleManualFeedAmount,
+    T3Litter, T4Litter, T5Litter, T6Litter, T7Litter, camera_rtm_peer_message,
+    camera_rtm_peer_message_for_base,
 };
 pub use request::{
     BaseUrl, FormField, Header, HttpMethod, QueryField, RequestBody, RequestSpec, ResponseParts,
@@ -295,6 +296,20 @@ mod tests {
                 .contains("/dev/v2/project/app-id/rtm/users/app_1001/peer_messages")
         );
         assert!(request.url.contains("wait_for_ack=true"));
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|header| header.name == "x-agora-token" && header.value.as_str() == "rtm")
+        );
+        assert!(
+            request.headers.iter().any(|header| {
+                header.name == "x-agora-uid" && header.value.as_str() == "app_1001"
+            })
+        );
+        assert!(request.headers.iter().any(|header| {
+            header.name == "Authorization" && header.value.as_str() == "agora token=rtm"
+        }));
         let body = request.body.expect("json body should exist").body;
         assert!(body.contains(r#""destination":"dev_2001""#));
         assert!(body.contains(r#""cmd\":\"ptz_ctrl\""#));
