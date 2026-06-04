@@ -393,6 +393,23 @@ mod tests {
     }
 
     #[test]
+    fn fountain_device_detail_uses_device_data_path() {
+        use petkit_types::FountainDeviceType;
+
+        let request = authenticated()
+            .fountain(FountainDeviceType::Ctw3, device_id(42))
+            .device_detail();
+        let id = request
+            .form_fields
+            .iter()
+            .find(|field| field.name == "id")
+            .expect("id field must exist");
+
+        assert_eq!(request.path, "ctw3/deviceData");
+        assert_eq!(id.value, "42");
+    }
+
+    #[test]
     fn parse_api_response_maps_petkit_error_codes() {
         let response = ResponseParts::new(
             200,

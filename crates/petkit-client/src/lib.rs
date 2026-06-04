@@ -1301,8 +1301,13 @@ fn discovered_cloud_ble_metadata_for_summary(
         | DiscoveredDeviceDetail::Purifier(response) => response,
     };
     let mac = non_empty_string(detail.mac.clone())?;
-    let device_type = non_empty_string(detail.device_type.clone())
-        .unwrap_or_else(|| device.device_type.as_str().to_string());
+    let device_type = device.device_type_id.or(device.type_code).map_or_else(
+        || {
+            non_empty_string(detail.device_type.clone())
+                .unwrap_or_else(|| device.device_type.as_str().to_string())
+        },
+        |value| value.to_string(),
+    );
     Some(CloudBleMetadata {
         device_type,
         mac,
@@ -1338,7 +1343,14 @@ fn match_cloud_ble_metadata(
                 .flatten()
         })?;
     Some(CloudBleMetadata {
-        device_type: device.device_type.as_str().to_string(),
+        device_type: relay
+            .type_id
+            .or(device.device_type_id)
+            .or(device.type_code)
+            .map_or_else(
+                || device.device_type.as_str().to_string(),
+                |value| value.to_string(),
+            ),
         mac: relay.mac.clone(),
         group_id: Some(device.group_id.to_string()),
         ble_id: device.ble_id.clone().or_else(|| Some(relay.id.clone())),
@@ -3634,7 +3646,7 @@ mod tests {
         let metadata =
             match_cloud_ble_metadata(&summary, &relays).expect("relay should match summary");
 
-        assert_eq!(metadata.device_type, "w5");
+        assert_eq!(metadata.device_type, "14");
         assert_eq!(metadata.mac, "aa:bb");
         assert_eq!(metadata.group_id.as_deref(), Some("7"));
         assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
@@ -3712,7 +3724,7 @@ mod tests {
         let metadata = discovered_cloud_ble_metadata_for_summary(&summary, detail)
             .expect("detail mac should complete cloud BLE metadata");
 
-        assert_eq!(metadata.device_type, "ctw3");
+        assert_eq!(metadata.device_type, "14");
         assert_eq!(metadata.mac, "aa:bb:cc:dd:ee:ff");
         assert_eq!(metadata.group_id.as_deref(), Some("7"));
         assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));

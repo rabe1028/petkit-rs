@@ -305,7 +305,10 @@ impl DeviceSummary {
     pub fn cloud_ble_metadata(&self) -> Option<CloudBleMetadata> {
         let mac = non_empty_string(self.mac.clone())?;
         Some(CloudBleMetadata {
-            device_type: self.device_type.as_str().to_string(),
+            device_type: self.device_type_id.or(self.type_code).map_or_else(
+                || self.device_type.as_str().to_string(),
+                |value| value.to_string(),
+            ),
             mac,
             group_id: Some(self.group_id.to_string()),
             ble_id: self.ble_id.clone(),
@@ -450,7 +453,7 @@ mod tests {
     #[test]
     fn family_list_device_summary_exposes_cloud_ble_metadata() {
         let raw = RawJson::parse(
-            r#"{"result":[{"deviceList":[{"deviceId":42,"deviceName":"fountain","deviceType":"w5","groupId":7,"uniqueId":"w5-42","mac":"aa:bb","bleId":"ble-42"}],"groupId":7,"petList":[]}]}"#,
+            r#"{"result":[{"deviceList":[{"deviceId":42,"deviceName":"fountain","deviceType":"w5","groupId":7,"uniqueId":"w5-42","type":14,"mac":"aa:bb","bleId":"ble-42"}],"groupId":7,"petList":[]}]}"#,
         )
         .expect("fixture should parse");
         let response = FamilyListResponse::try_from(
@@ -466,7 +469,7 @@ mod tests {
         let metadata = device
             .cloud_ble_metadata()
             .expect("metadata should include mac");
-        assert_eq!(metadata.device_type, "w5");
+        assert_eq!(metadata.device_type, "14");
         assert_eq!(metadata.mac, "aa:bb");
         assert_eq!(metadata.group_id.as_deref(), Some("7"));
         assert_eq!(metadata.ble_id.as_deref(), Some("ble-42"));
