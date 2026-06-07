@@ -109,7 +109,8 @@ impl<T> AsyncPetkitClient<T> {
         session_id: impl Into<String>,
         transport: T,
     ) -> Self {
-        let public = PublicProtocol::new(context.clone());
+        let public =
+            PublicProtocol::with_login_base_url(context.clone(), regional_base_url.clone());
         let auth = AuthenticatedProtocol::new(context, regional_base_url, session_id);
         Self {
             public,
@@ -291,7 +292,8 @@ impl<T> BlockingPetkitClient<T> {
         session_id: impl Into<String>,
         transport: T,
     ) -> Self {
-        let public = PublicProtocol::new(context.clone());
+        let public =
+            PublicProtocol::with_login_base_url(context.clone(), regional_base_url.clone());
         let auth = AuthenticatedProtocol::new(context, regional_base_url, session_id);
         Self {
             public,
@@ -3082,7 +3084,7 @@ mod tests {
 
     #[cfg(any(feature = "async", feature = "blocking"))]
     use std::cell::RefCell;
-    #[cfg(feature = "async")]
+    #[cfg(any(feature = "async", feature = "blocking"))]
     use std::collections::VecDeque;
     #[cfg(feature = "async")]
     use std::future::{Future, ready};
@@ -3142,6 +3144,32 @@ mod tests {
                 .expect("request mutex should not be poisoned")
                 .replace(request);
             Ok(self.response.clone())
+        }
+    }
+
+    #[cfg(feature = "blocking")]
+    #[derive(Debug)]
+    struct SequenceBlockingTransport {
+        paths: Mutex<Vec<String>>,
+        responses: Mutex<VecDeque<ResponseParts>>,
+    }
+
+    #[cfg(feature = "blocking")]
+    impl BlockingTransport for SequenceBlockingTransport {
+        type Error = std::convert::Infallible;
+
+        fn send(&self, request: RequestSpec) -> Result<ResponseParts, Self::Error> {
+            self.paths
+                .lock()
+                .expect("paths mutex should not be poisoned")
+                .push(request.path);
+            let response = self
+                .responses
+                .lock()
+                .expect("responses mutex should not be poisoned")
+                .pop_front()
+                .expect("test response should exist");
+            Ok(response)
         }
     }
 
@@ -3320,6 +3348,7 @@ mod tests {
             .expect("login request should be captured");
 
         assert_eq!(session.id.expose_secret(), "s1");
+        assert_eq!(request.url(), "https://api.petkt.com/latest/user/login");
         assert_eq!(request.path, "user/login");
         // After login, the session id is persisted on the client.
         assert_eq!(client.authenticated().session_id(), "s1");
@@ -3327,6 +3356,18 @@ mod tests {
             client.authenticated().protocol().family_list().url,
             "https://api.petkt.com/6/group/family/list"
         );
+
+        let _session = client
+            .login_with_password("user@example.com", "password", "DE")
+            .expect("second login response should parse");
+        let request = client
+            .transport
+            .last_request
+            .lock()
+            .expect("request mutex should not be poisoned")
+            .clone()
+            .expect("second login request should be captured");
+        assert_eq!(request.url(), "https://api.petkt.com/latest/user/login");
     }
 
     #[cfg(feature = "blocking")]
@@ -3891,6 +3932,53 @@ mod tests {
                 .lock()
                 .expect("request mutex should not be poisoned")
                 .is_none()
+        );
+    }
+
+    #[cfg(feature = "blocking")]
+    #[test]
+    fn blocking_cloud_ble_metadata_resolves_relay_ble_id_for_partial_summary() {
+        let transport = SequenceBlockingTransport {
+            paths: Mutex::new(Vec::new()),
+            responses: Mutex::new(VecDeque::from([
+                ResponseParts::new(404, vec![], br#"{}"#.to_vec()),
+                ResponseParts::new(
+                    200,
+                    vec![],
+                    br#"{"result":{"list":[{"id":"ble-ctw3","mac":"11:22","name":"relay","typeId":14}]}}"#.to_vec(),
+                ),
+            ])),
+        };
+        let client = BlockingPetkitClient::with_session(ctx(), regional(), "session-id", transport);
+        let summary = DeviceSummary {
+            device_id: 42,
+            device_name: Some(String::from("fountain")),
+            device_type: DeviceType::Ctw3,
+            group_id: 7,
+            mac: Some(String::from("aa:bb")),
+            ble_id: None,
+            device_type_id: Some(14),
+            type_code: None,
+            unique_id: String::from("ctw3-42"),
+        };
+
+        let metadata = client
+            .authenticated()
+            .cloud_ble()
+            .resolve_cloud_ble_metadata(&summary)
+            .expect("partial summary metadata should resolve")
+            .expect("summary mac should remain metadata");
+
+        assert_eq!(metadata.mac, "aa:bb");
+        assert_eq!(metadata.ble_id.as_deref(), Some("ble-ctw3"));
+        assert_eq!(
+            client
+                .transport
+                .paths
+                .lock()
+                .expect("paths mutex should not be poisoned")
+                .as_slice(),
+            ["ctw3/deviceData", "ble/ownSupportBleDevices"]
         );
     }
 

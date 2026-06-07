@@ -71,11 +71,23 @@ const LOGIN_CODE_PATH: &str = "user/sendcodeforquicklogin";
 #[derive(Clone, Debug)]
 pub struct PublicProtocol {
     context: ClientContext,
+    login_base_url: BaseUrl,
 }
 
 impl PublicProtocol {
     pub fn new(context: ClientContext) -> Self {
-        Self { context }
+        Self::with_login_base_url(context, BaseUrl::Passport)
+    }
+
+    pub fn with_login_base_url(context: ClientContext, login_base_url: BaseUrl) -> Self {
+        Self {
+            context,
+            login_base_url,
+        }
+    }
+
+    pub fn set_login_base_url(&mut self, login_base_url: BaseUrl) {
+        self.login_base_url = login_base_url;
     }
 
     pub fn region_servers(&self) -> RequestSpec {
@@ -105,7 +117,7 @@ impl PublicProtocol {
     }
 
     fn login_request(&self, username: &str, region: &str) -> RequestSpec {
-        RequestSpec::new(HttpMethod::Post, &BaseUrl::Passport, LOGIN_PATH)
+        RequestSpec::new(HttpMethod::Post, &self.login_base_url, LOGIN_PATH)
             .with_default_headers(&self.context)
             .push_form_field("oldVersion", self.context.profile.api_version.clone())
             .push_form_field("client", self.context.render_client_descriptor())
