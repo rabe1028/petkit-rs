@@ -95,6 +95,16 @@ mod tests {
     }
 
     #[test]
+    fn login_request_can_use_regional_base() {
+        let request = PublicProtocol::with_login_base_url(
+            context(),
+            BaseUrl::Regional("https://api.petktasia.com/latest/".to_owned()),
+        )
+        .login_with_password("user@example.com", "deadbeef", "JP");
+        assert_eq!(request.url(), "https://api.petktasia.com/latest/user/login");
+    }
+
+    #[test]
     fn manual_feed_uses_legacy_endpoint_for_feeder_mini() {
         let request = authenticated()
             .feeder_typed::<FeederMiniFeeder>(device_id(42))
